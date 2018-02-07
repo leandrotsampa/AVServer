@@ -51,6 +51,7 @@
 #define VIDEO_STREAMTYPE_DIVX4		 14
 #define VIDEO_STREAMTYPE_DIVX5		 15
 
+#define MAX_ADAPTER	4
 #define PLAYER_DEMUX_PORT 4
 
 struct class_ops player_ops;
@@ -58,16 +59,16 @@ struct class_ops player_ops;
 struct s_player {
 	bool IsCreated;
 	int TunerID;
-	int PlayerMode;
-	int AudioPid;
+	int PlayerMode;		/* 0 demux, 1 memory */
+	int AudioPid;		/* unknown pid */
 	int AudioType;
-	int AudioChannel;
-	int AudioState;
-	int VideoPid;
+	int AudioChannel;	/* 0 stereo, 1 left, 2 right */
+	int AudioState;		/* 0 stoped, 1 playing, 2 paused */
+	int VideoPid;		/* unknown pid */
 	int VideoType;
-	int VideoState;
-	int VideoFormat;
-	int DisplayFormat;
+	int VideoState;		/* 0 stoped, 1 playing, 2 freezed */
+	int VideoFormat;	/* 0 4:3, 1 16:9, 2 2.21:1 */
+	int DisplayFormat;	/* 0 Pan&Scan, 1 Letterbox, 2 Center Cut Out */
 	long long LastPTS;
 
 	bool IsBlank;
@@ -78,6 +79,34 @@ struct s_player {
 	unsigned int hWindow;
 	unsigned int hTrack;
 };
+
+void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
+{
+	int i;
+	HI_HANDLE hPKey;
+	HI_UNF_DMX_GetDescramblerKeyHandle(hPChannel, &hPKey);
+
+	for (i = 0; i < MAX_ADAPTER; i++)
+	{
+		HI_HANDLE hChannel;
+
+		if (HI_UNF_DMX_GetChannelHandle(i, (HI_U32)pid, &hChannel) == HI_SUCCESS)
+		{
+			HI_HANDLE hKey;
+
+			if (HI_UNF_DMX_GetDescramblerKeyHandle(hChannel, &hKey) == HI_SUCCESS)
+			{
+				if (hPKey && hPKey != hKey)
+					HI_UNF_DMX_DetachDescrambler(hPKey, hPChannel);
+
+				if (HI_UNF_DMX_AttachDescrambler(hKey, hPChannel) != HI_SUCCESS)
+					printf("[ERROR] %s -> Failed to attach KeyHandle to PID %d.\n", __FUNCTION__, pid);
+			}
+
+			break;
+		}
+	}
+}
 
 bool player_create(void)
 {
@@ -209,16 +238,16 @@ bool player_create(void)
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
 
 	player->IsCreated		= true;
-	player->PlayerMode		= 0; /* 0 demux, 1 memory */
-	player->AudioPid		= 0x1FFFF; /* unknown pid */
+	player->PlayerMode		= 0;
+	player->AudioPid		= 0x1FFFF;
 	player->AudioType		= 0;
-	player->AudioChannel	= 0; /* 0 stereo, 1 left, 2 right */
-	player->AudioState		= 0; /* 0 stoped, 1 playing, 2 paused */
-	player->VideoPid		= 0x1FFFF; /* unknown pid */
+	player->AudioChannel	= 0;
+	player->AudioState		= 0;
+	player->VideoPid		= 0x1FFFF;
 	player->VideoType		= 0;
-	player->VideoState		= 0; /* 0 stoped, 1 playing, 2 freezed */
-	player->VideoFormat		= 1; /* 0 4:3, 1 16:9, 2 2.21:1 */
-	player->DisplayFormat	= 0; /* 0 Pan&Scan, 1 Letterbox, 2 Center Cut Out */
+	player->VideoState		= 0;
+	player->VideoFormat		= 1;
+	player->DisplayFormat	= 0;
 	player->IsBlank			= true;
 	player->IsSyncEnabled	= true;
 	player->IsMute			= false;
@@ -259,7 +288,7 @@ SYS_DEINIT:
 
 void player_destroy(void)
 {
-	printf("[INFO] %s called.\n", __FUNCTION__);
+	printf("[INFO] %s -> called.\n", __FUNCTION__);
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (player && player->IsCreated)
@@ -306,12 +335,123 @@ bool player_set_type(int dev_type, int type)
 		return false;
 	}
 
+	switch (dev_type)
+	{
+		case DEV_AUDIO:
+		{
+			HA_CODEC_ID_E htype;
+
+			if (player->AudioType == type)
+				return true;
+			else if (player->AudioState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Audio Type if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+
+			switch (type)
+			{
+				case AUDIO_STREAMTYPE_AC3:
+					htype = HA_AUDIO_ID_DOLBY_PLUS;
+				break;
+				case AUDIO_STREAMTYPE_MPEG:
+				case AUDIO_STREAMTYPE_MP3:
+					htype = HA_AUDIO_ID_MP3;
+				break;
+				case AUDIO_STREAMTYPE_LPCM:
+					htype = HA_AUDIO_ID_PCM;
+				break;
+				case AUDIO_STREAMTYPE_AAC:
+				case AUDIO_STREAMTYPE_AACPLUS:
+				case AUDIO_STREAMTYPE_AACHE:
+					htype = HA_AUDIO_ID_AAC;
+				break;
+				case AUDIO_STREAMTYPE_DTS:
+				case AUDIO_STREAMTYPE_DTSHD:
+					htype = HA_AUDIO_ID_DTSHD;
+				break;
+				case AUDIO_STREAMTYPE_DDP:
+					htype = HA_AUDIO_ID_DOLBY_PLUS;
+				break;
+				case AUDIO_STREAMTYPE_RAW:
+					htype = HA_AUDIO_ID_PCM;
+				break;
+				default: /* FallBack to MP3 */
+					htype = HA_AUDIO_ID_MP3;
+				break;
+			}
+
+			if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to set Audio Type %d.\n", __FUNCTION__, type);
+				return false;
+			}
+
+			player->AudioType = type;
+		}
+		break;
+		case DEV_VIDEO:
+		{
+			HI_UNF_VCODEC_TYPE_E htype;
+
+			if (player->VideoType == type)
+				return true;
+			else if (player->VideoState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Video Type if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+
+			switch (type)
+			{
+				case VIDEO_STREAMTYPE_MPEG2:
+					htype = HI_UNF_VCODEC_TYPE_MPEG2;
+				break;
+				case VIDEO_STREAMTYPE_MPEG4_H264:
+					htype = HI_UNF_VCODEC_TYPE_H264;
+				break;
+				case VIDEO_STREAMTYPE_VC1:
+				case VIDEO_STREAMTYPE_VC1_SM:
+					htype = HI_UNF_VCODEC_TYPE_VC1;
+				break;
+				case VIDEO_STREAMTYPE_DIVX4:
+				case VIDEO_STREAMTYPE_DIVX5:
+				case VIDEO_STREAMTYPE_MPEG4_Part2:
+					htype = HI_UNF_VCODEC_TYPE_MPEG4;
+				break;
+				case VIDEO_STREAMTYPE_H263:
+					htype = HI_UNF_VCODEC_TYPE_H263;
+				break;
+				case VIDEO_STREAMTYPE_DIVX311:
+					htype = HI_UNF_VCODEC_TYPE_DIVX3;
+				break;
+				case VIDEO_STREAMTYPE_H265_HEVC:
+					htype = HI_UNF_VCODEC_TYPE_HEVC;
+				break;
+				case VIDEO_STREAMTYPE_MPEG1:
+				default:
+					htype = HI_UNF_VCODEC_TYPE_MPEG2;
+				break;
+			}
+
+			if (HIADP_AVPlay_SetVdecAttr(player->hPlayer, htype, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to set Video Type %d.\n", __FUNCTION__, type);
+				return false;
+			}
+
+			player->VideoType = type;
+		}
+		break;
+	}
+
 	return true;
 }
 
 bool player_set_pid(int dev_type, int pid)
 {
 	printf("[INFO] %s(%d, %d) -> called.\n", __FUNCTION__, dev_type, pid);
+	HI_HANDLE hChannel;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -328,13 +468,44 @@ bool player_set_pid(int dev_type, int pid)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (player->AudioPid == pid)
+				return true;
+			else if (player->AudioState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Audio PID if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+
+			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_AUD_PID, &pid) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to set a new PID %d for Audio.\n", __FUNCTION__, pid);
+				return false;
+			}
+
+			if (HI_UNF_AVPLAY_GetDmxAudChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
+				player_set_keyhandler(hChannel, pid);
+
 			player->AudioPid = pid;
 		break;
 		case DEV_VIDEO:
+			if (player->VideoPid == pid)
+				return true;
+			else if (player->VideoState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Video PID if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+
+			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VID_PID, &pid) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to set a new PID %d for Video.\n", __FUNCTION__, pid);
+				return false;
+			}
+
+			if (HI_UNF_AVPLAY_GetDmxVidChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
+				player_set_keyhandler(hChannel, pid);
+
 			player->VideoPid = pid;
-		break;
-		default:
-			printf("[ERROR] %s(%d, %d) -> Wrong device type.\n", __FUNCTION__, dev_type, pid);
 		break;
 	}
 
@@ -344,6 +515,9 @@ bool player_set_pid(int dev_type, int pid)
 bool player_set_mode(int mode)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, mode);
+	HI_UNF_DMX_PORT_E enToPortId;
+	HI_UNF_DMX_PORT_E enFromPortId;
+	HI_UNF_AVPLAY_ATTR_S stAvplayAttr;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -351,6 +525,49 @@ bool player_set_mode(int mode)
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
 		return false;
 	}
+	else if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
+		return false;
+
+	enToPortId = (mode != 0 /* DEMUX */ ? HI_UNF_DMX_PORT_RAM_0 : (HI_UNF_DMX_PORT_TSI_0 + player->TunerID));
+	if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
+	{
+		if (enFromPortId == enToPortId)
+			return true;
+		else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
+			return false;
+	}
+
+	if (HI_UNF_DMX_AttachTSPort(stAvplayAttr.u32DemuxId, enToPortId) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
+		return false;
+	}
+
+	if (stAvplayAttr.stStreamAttr.enStreamType != (mode != 0 ? HI_UNF_AVPLAY_STREAM_TYPE_ES : HI_UNF_AVPLAY_STREAM_TYPE_TS))
+	{
+		stAvplayAttr.stStreamAttr.enStreamType = (mode != 0 ? HI_UNF_AVPLAY_STREAM_TYPE_ES : HI_UNF_AVPLAY_STREAM_TYPE_TS);
+
+		if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
+			printf("[ERROR] %s -> Failed to change Stream Mode.\n", __FUNCTION__);
+	}
+
+	/*switch (dev_type)
+	{
+		case DEV_AUDIO:
+			if (player->AudioState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Audio Mode if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+		break;
+		case DEV_VIDEO:
+			if (player->VideoState != 0)
+			{
+				printf("[ERROR] %s -> Only can change Video Mode if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+		break;
+	}*/
 
 	player->PlayerMode = mode;
 
@@ -419,13 +636,32 @@ bool player_play(int dev_type)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (player->AudioState != 0)
+			{
+				printf("[ERROR] %s -> Only can play Audio if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+			else if (HI_UNF_AVPLAY_Start(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, NULL) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to play Audio.\n", __FUNCTION__);
+				return false;
+			}
+
 			player->AudioState = 1;
 		break;
 		case DEV_VIDEO:
+			if (player->VideoState != 0)
+			{
+				printf("[ERROR] %s -> Only can play Video if is in STOPED state.\n", __FUNCTION__);
+				return false;
+			}
+			else if (HI_UNF_AVPLAY_Start(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, NULL) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to play Video.\n", __FUNCTION__);
+				return false;
+			}
+
 			player->VideoState = 1;
-		break;
-		default:
-			return false;
 		break;
 	}
 
@@ -486,9 +722,9 @@ bool player_resume(int dev_type)
 	return true;
 }
 
-bool player_stop(int dev_type, int mode)
+bool player_stop(int dev_type)
 {
-	printf("[INFO] %s(%d, %d) -> called.\n", __FUNCTION__, dev_type, mode);
+	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, dev_type);
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -500,13 +736,34 @@ bool player_stop(int dev_type, int mode)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (player->AudioState == 0)
+				return true;
+			else if (HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to stop Audio.\n", __FUNCTION__);
+				return false;
+			}
+
 			player->AudioState = 0;
 		break;
 		case DEV_VIDEO:
+		{
+			HI_UNF_AVPLAY_STOP_OPT_S stStop;
+
+			if (player->VideoState == 0)
+				return true;
+
+			stStop.u32TimeoutMs = 0;
+			stStop.enMode = player->IsBlank ? HI_UNF_AVPLAY_STOP_MODE_BLACK : HI_UNF_AVPLAY_STOP_MODE_STILL;
+
+			if (HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to stop Video.\n", __FUNCTION__);
+				return false;
+			}
+
 			player->VideoState = 0;
-		break;
-		default:
-			return false;
+		}
 		break;
 	}
 
@@ -532,6 +789,7 @@ bool player_mute(bool mute)
 bool player_sync(bool sync)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, sync);
+	HI_UNF_SYNC_ATTR_S stSyncAttr;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -540,9 +798,19 @@ bool player_sync(bool sync)
 		return false;
 	}
 
-	player->IsSyncEnabled = sync;
+	if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr) == HI_SUCCESS)
+	{
+		stSyncAttr.enSyncRef = sync ? HI_UNF_SYNC_REF_AUDIO : HI_UNF_SYNC_REF_NONE;
 
-	return true;
+		if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr) == HI_SUCCESS)
+		{
+			player->IsSyncEnabled = sync;
+			return true;
+		}
+	}
+
+	printf("[ERROR] %s -> Failed to set Sync.\n", __FUNCTION__);
+	return false;
 }
 
 bool player_channel(int channel)

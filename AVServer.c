@@ -284,7 +284,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case AUDIO_STOP:
 			printf("%s: AUDIO_STOP\n", __FUNCTION__);
 
-			return player->stop(DEV_AUDIO, -1) - 1;
+			return player->stop(DEV_AUDIO) - 1;
 		break;
 		case AUDIO_PLAY:
 			printf("%s: AUDIO_PLAY\n", __FUNCTION__);
@@ -361,7 +361,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case VIDEO_STOP:
 			printf("%s: VIDEO_STOP\n", __FUNCTION__);
 
-			return player->stop(DEV_VIDEO, 0) - 1;
+			return player->stop(DEV_VIDEO) - 1;
 		break;
 		case VIDEO_PLAY:
 			printf("%s: VIDEO_PLAY\n", __FUNCTION__);

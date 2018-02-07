@@ -31,7 +31,7 @@ struct class_ops {
     bool (*play)(int);
 	bool (*pause)(int);
 	bool (*resume)(int);
-	bool (*stop)(int, int);
+	bool (*stop)(int);
 	bool (*mute)(bool);
     bool (*sync)(bool);
 	bool (*channel)(int);

@@ -1,4 +1,57 @@
 #include <AVServer.h>
+#include <hi_adp_mpi.h>
+#include <hi_common.h>
+#include <hi_unf_avplay.h>
+#include <hi_unf_descrambler.h>
+#include <hi_unf_demux.h>
+#include <hi_unf_ecs.h>
+#include <hi_unf_keyled.h>
+#include <hi_unf_sound.h>
+#include <hi_unf_vo.h>
+#include <hi_video_codec.h>
+
+/* Audio Includes */
+#include <HA.AUDIO.MP3.decode.h>
+#include <HA.AUDIO.MP2.decode.h>
+#include <HA.AUDIO.AAC.decode.h>
+#include <HA.AUDIO.DRA.decode.h>
+#include <HA.AUDIO.PCM.decode.h>
+#include <HA.AUDIO.WMA9STD.decode.h>
+#include <HA.AUDIO.TRUEHDPASSTHROUGH.decode.h>
+#include <HA.AUDIO.DOLBYTRUEHD.decode.h>
+#include <HA.AUDIO.DTSHD.decode.h>
+#include <HA.AUDIO.DOLBYPLUS.decode.h>
+#include <HA.AUDIO.AC3PASSTHROUGH.decode.h>
+#include <HA.AUDIO.DTSM6.decode.h>
+#include <HA.AUDIO.DTSPASSTHROUGH.decode.h>
+#include <HA.AUDIO.FFMPEG_DECODE.decode.h>
+
+#define AUDIO_STREAMTYPE_AC3	 0
+#define AUDIO_STREAMTYPE_MPEG	 1
+#define AUDIO_STREAMTYPE_DTS	 2
+#define AUDIO_STREAMTYPE_LPCM	 6
+#define AUDIO_STREAMTYPE_AAC	 8
+#define AUDIO_STREAMTYPE_AACHE	 9
+#define AUDIO_STREAMTYPE_MP3	 10
+#define AUDIO_STREAMTYPE_AACPLUS 11
+#define AUDIO_STREAMTYPE_DTSHD	 16
+#define AUDIO_STREAMTYPE_DDP	 34
+#define AUDIO_STREAMTYPE_RAW	 48
+
+#define VIDEO_STREAMTYPE_MPEG2		 0
+#define VIDEO_STREAMTYPE_MPEG4_H264	 1
+#define VIDEO_STREAMTYPE_H263		 2
+#define VIDEO_STREAMTYPE_VC1		 3
+#define VIDEO_STREAMTYPE_MPEG4_Part2 4
+#define VIDEO_STREAMTYPE_VC1_SM		 5
+#define VIDEO_STREAMTYPE_MPEG1		 6
+#define VIDEO_STREAMTYPE_H265_HEVC	 7
+#define VIDEO_STREAMTYPE_XVID		 10
+#define VIDEO_STREAMTYPE_DIVX311	 13
+#define VIDEO_STREAMTYPE_DIVX4		 14
+#define VIDEO_STREAMTYPE_DIVX5		 15
+
+#define PLAYER_DEMUX_PORT 4
 
 struct class_ops player_ops;
 
@@ -28,10 +81,132 @@ struct s_player {
 
 bool player_create(void)
 {
+	printf("[INFO] %s -> called.\n", __FUNCTION__);
+	HI_UNF_SYNC_ATTR_S       stSyncAttr;
+	HI_UNF_AVPLAY_ATTR_S     stAvplayAttr;
+	HI_UNF_AVPLAY_OPEN_OPT_S OpenOpt;
+	HI_UNF_AUDIOTRACK_ATTR_S stTrackAttr;
 	struct s_player *player = calloc(1, sizeof(struct s_player));
 
 	if (!player)
 		return false;
+
+	if (HI_SYS_Init() != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_SYS_Init failed.\n", __FUNCTION__);
+		return false;
+	}
+
+	if (HIADP_Snd_Init() != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HIADP_Snd_Init failed.\n", __FUNCTION__);
+		goto SYS_DEINIT;
+	}
+
+	if (HIADP_Disp_Init(HI_UNF_ENC_FMT_720P_50) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HIADP_Disp_Init failed.\n", __FUNCTION__);
+		goto SND_DEINIT;
+	}
+
+	if (HIADP_VO_Init(HI_UNF_VO_DEV_MODE_NORMAL) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HIADP_VO_Init failed.\n", __FUNCTION__);
+		goto DISP_DEINIT;
+	}
+
+	if (HIADP_VO_CreatWin(HI_NULL, &player->hWindow) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HIADP_VO_CreatWin failed.\n", __FUNCTION__);
+		goto VO_DEINIT;
+	}
+
+	if (HI_UNF_DMX_Init() != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_DMX_Init failed.\n", __FUNCTION__);
+		goto VO_DEINIT;
+	}
+
+	if (HI_UNF_DMX_AttachTSPort(PLAYER_DEMUX_PORT, HI_UNF_DMX_PORT_TSI_0) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> Failed to Attach TS Port.\n", __FUNCTION__);
+		goto DMX_DEINIT;
+	}
+
+	if (HIADP_AVPlay_RegADecLib() != HI_SUCCESS)
+		printf("[ERROR] %s -> HIADP_AVPlay_RegADecLib failed.\n", __FUNCTION__);
+
+	if (HI_UNF_AVPLAY_Init() != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_AVPLAY_Init failed.\n", __FUNCTION__);
+		goto DMX_DEINIT;
+	}
+
+	HI_UNF_AVPLAY_GetDefaultConfig(&stAvplayAttr, HI_UNF_AVPLAY_STREAM_TYPE_TS);
+	stAvplayAttr.u32DemuxId = PLAYER_DEMUX_PORT;
+	if (HI_UNF_AVPLAY_Create(&stAvplayAttr, &player->hPlayer) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_AVPLAY_Create failed.\n", __FUNCTION__);
+		goto AVPLAY_DEINIT;
+	}
+
+	OpenOpt.enDecType  = HI_UNF_VCODEC_DEC_TYPE_NORMAL;
+	OpenOpt.enCapLevel = HI_UNF_VCODEC_CAP_LEVEL_FULLHD;
+	OpenOpt.enProtocolLevel = HI_UNF_VCODEC_PRTCL_LEVEL_H264;
+	if (HI_UNF_AVPLAY_ChnOpen(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &OpenOpt) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> Failed to Open Video Channel.\n", __FUNCTION__);
+		goto AVPLAY_DESTROY;
+	}
+
+	if (HI_UNF_AVPLAY_ChnOpen(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> Failed to Open Audio Channel.\n", __FUNCTION__);
+		goto VCHN_CLOSE;
+	}
+
+	if (HI_UNF_VO_AttachWindow(player->hWindow, player->hPlayer) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_VO_AttachWindow failed.\n", __FUNCTION__);
+		goto ACHN_CLOSE;
+	}
+
+	if (HI_UNF_VO_SetWindowEnable(player->hWindow, HI_TRUE) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_VO_SetWindowEnable failed.\n", __FUNCTION__);
+		goto WIN_DETACH;
+	}
+
+	if (HI_UNF_SND_GetDefaultTrackAttr(HI_UNF_SND_TRACK_TYPE_MASTER, &stTrackAttr) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_SND_GetDefaultTrackAttr failed.\n", __FUNCTION__);
+		goto WIN_DETACH;
+	}
+
+	if (HI_UNF_SND_CreateTrack(HI_UNF_SND_0, &stTrackAttr, &player->hTrack) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_SND_CreateTrack failed.\n", __FUNCTION__);
+		goto WIN_DETACH;
+	}
+
+	if (HI_UNF_SND_Attach(player->hTrack, player->hPlayer) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_SND_Attach failed.\n", __FUNCTION__);
+		goto TRACK_DESTROY;
+	}
+
+	HIADP_AVPlay_SetAdecAttr(player->hPlayer, HA_AUDIO_ID_MP3, HD_DEC_MODE_RAWPCM, 0);
+	HIADP_AVPlay_SetVdecAttr(player->hPlayer, HI_UNF_VCODEC_TYPE_MPEG2, HI_UNF_VCODEC_MODE_NORMAL);
+
+	HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr);
+	stSyncAttr.enSyncRef = HI_UNF_SYNC_REF_AUDIO;
+	if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_AVPLAY_SetAttr failed.\n", __FUNCTION__);
+		goto SND_DETACH;
+	}
+
+	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
 
 	player->IsCreated		= true;
 	player->PlayerMode		= 0; /* 0 demux, 1 memory */
@@ -50,14 +225,71 @@ bool player_create(void)
 
 	player_ops.priv = player;
 	return true;
+
+SND_DETACH:
+	HI_UNF_SND_Detach(player->hTrack, player->hPlayer);
+TRACK_DESTROY:
+	HI_UNF_SND_DestroyTrack(player->hTrack);
+WIN_DETACH:
+	HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
+	HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
+ACHN_CLOSE:
+	HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
+VCHN_CLOSE:
+	HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
+AVPLAY_DESTROY:
+	HI_UNF_AVPLAY_Destroy(player->hPlayer);
+AVPLAY_DEINIT:
+	HI_UNF_AVPLAY_DeInit();
+DMX_DEINIT:
+	HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
+	HI_UNF_DMX_DeInit();
+VO_DEINIT:
+	HI_UNF_VO_DestroyWindow(player->hWindow);
+	HIADP_VO_DeInit();
+DISP_DEINIT:
+	HIADP_Disp_DeInit();
+SND_DEINIT:
+	HIADP_Snd_DeInit();
+SYS_DEINIT:
+	HI_SYS_DeInit();
+
+	return false;
 }
 
 void player_destroy(void)
 {
+	printf("[INFO] %s called.\n", __FUNCTION__);
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (player && player->IsCreated)
 	{
+		printf("[INFO] %s shit.\n", __FUNCTION__);
+		return;
+		//hi_player_audio_stop();
+		//hi_player_video_stop(HI_UNF_AVPLAY_STOP_MODE_BLACK);
+
+		HI_UNF_SND_Detach(player->hTrack, player->hPlayer);
+		HI_UNF_SND_DestroyTrack(player->hTrack);
+
+		HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
+		HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
+
+		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
+		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
+
+		HI_UNF_AVPLAY_Destroy(player->hPlayer);
+		HI_UNF_AVPLAY_DeInit();
+
+		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
+		HI_UNF_DMX_DeInit();
+
+		HI_UNF_VO_DestroyWindow(player->hWindow);
+		HIADP_VO_DeInit();
+
+		HIADP_Disp_DeInit();
+		HIADP_Snd_DeInit();
+		HI_SYS_DeInit();
 	}
 	else
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);

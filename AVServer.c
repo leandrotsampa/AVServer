@@ -211,8 +211,6 @@ static int dvb_hisi_read(const char *path, char *buf, size_t size, off_t offset,
 
 static int dvb_hisi_do_write(const char *buf, size_t size, off_t offset)
 {
-	printf("%s -> Called.\n", __FUNCTION__);
-
 	//memcpy(dvb_hisi_buf + offset, buf, size);
 
 	return size;
@@ -220,13 +218,13 @@ static int dvb_hisi_do_write(const char *buf, size_t size, off_t offset)
 
 static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
-	printf("%s -> Called.\n", __FUNCTION__);
 	//struct fuse_context *cxt = fuse_get_context();
 	//struct class_ops *player = (struct class_ops *)cxt->private_data;
 
 	if (dvb_hisi_file_type(path) < DVB_FILE)
 		return -EINVAL;
 
+	printf("%s -> Type %d and Size %d.\n", __FUNCTION__, dvb_hisi_file_type(path), size);
 	return dvb_hisi_do_write(buf, size, offset);
 }
 
@@ -457,12 +455,11 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 
 static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
 {
-	printf("%s -> Called.\n", __FUNCTION__);
-	int mask = POLLOUT | POLLIN; //TODO: connect with avplayer mode
+	*reventsp = POLLOUT | POLLIN; //TODO: connect with avplayer mode
 	//struct fuse_context *cxt = fuse_get_context();
 	//struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	return mask;
+	return 0;
 }
 
 static struct fuse_operations dvb_hisi_oper = {

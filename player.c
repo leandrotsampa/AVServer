@@ -240,11 +240,11 @@ bool player_create(void)
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
 	player->AudioPid		= 0x1FFFF;
-	player->AudioType		= 0;
+	player->AudioType		= 10; /* MP3 */
 	player->AudioChannel	= 0;
 	player->AudioState		= 0;
 	player->VideoPid		= 0x1FFFF;
-	player->VideoType		= 0;
+	player->VideoType		= 1; /* H264 */
 	player->VideoState		= 0;
 	player->VideoFormat		= 1;
 	player->DisplayFormat	= 0;

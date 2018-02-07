@@ -155,8 +155,8 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 {
 	int type = dvb_hisi_file_type(path);
-	//struct fuse_context *cxt = fuse_get_context();
-	//struct class_ops *player = (struct class_ops *)cxt->private_data;
+	struct fuse_context *cxt = fuse_get_context();
+	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
 	printf("%s -> type is %d.\n", __FUNCTION__, type);
 
@@ -168,16 +168,15 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
 				dvb_hisi_open_mask &= ~(1 << type);
+
+				if (type == DVB_AUDIO_DEV && player)
+					player->stop(DEV_AUDIO);
+				else if (type == DVB_VIDEO_DEV && player)
+					player->stop(DEV_VIDEO);
 			break;
 			default:
 			break;
 		}
-		/*
-		if (type == DVB_AUDIO_DEV)
-			dvb_hisi_player_set_audio_stop();
-		else if (type == DVB_VIDEO_DEV)
-			dvb_hisi_player_set_video_stop(STOP_MODE_BLACK);
-		*/
 	}
 
 	return 0;

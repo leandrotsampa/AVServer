@@ -343,9 +343,9 @@ bool player_set_type(int dev_type, int type)
 
 			if (player->AudioType == type)
 				return true;
-			else if (player->AudioState != 0)
+			else if (player->AudioState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Audio Type if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Audio Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 
@@ -396,9 +396,9 @@ bool player_set_type(int dev_type, int type)
 
 			if (player->VideoType == type)
 				return true;
-			else if (player->VideoState != 0)
+			else if (player->VideoState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Video Type if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Video Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 
@@ -470,9 +470,9 @@ bool player_set_pid(int dev_type, int pid)
 		case DEV_AUDIO:
 			if (player->AudioPid == pid)
 				return true;
-			else if (player->AudioState != 0)
+			else if (player->AudioState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Audio PID if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Audio PID if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 
@@ -490,9 +490,9 @@ bool player_set_pid(int dev_type, int pid)
 		case DEV_VIDEO:
 			if (player->VideoPid == pid)
 				return true;
-			else if (player->VideoState != 0)
+			else if (player->VideoState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Video PID if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Video PID if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 
@@ -554,16 +554,16 @@ bool player_set_mode(int mode)
 	/*switch (dev_type)
 	{
 		case DEV_AUDIO:
-			if (player->AudioState != 0)
+			if (player->AudioState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Audio Mode if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Audio Mode if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 		break;
 		case DEV_VIDEO:
-			if (player->VideoState != 0)
+			if (player->VideoState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Video Mode if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can change Video Mode if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 		break;
@@ -636,9 +636,9 @@ bool player_play(int dev_type)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
-			if (player->AudioState != 0)
+			if (player->AudioState == 1)
 			{
-				printf("[ERROR] %s -> Only can play Audio if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can play Audio if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 			else if (HI_UNF_AVPLAY_Start(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, NULL) != HI_SUCCESS)
@@ -650,9 +650,9 @@ bool player_play(int dev_type)
 			player->AudioState = 1;
 		break;
 		case DEV_VIDEO:
-			if (player->VideoState != 0)
+			if (player->VideoState == 1)
 			{
-				printf("[ERROR] %s -> Only can play Video if is in STOPED state.\n", __FUNCTION__);
+				printf("[ERROR] %s -> Only can play Video if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
 			else if (HI_UNF_AVPLAY_Start(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, NULL) != HI_SUCCESS)

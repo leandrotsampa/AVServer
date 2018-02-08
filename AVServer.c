@@ -416,7 +416,8 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		break;
 		case VIDEO_GET_EVENT:
 			printf("%s: VIDEO_GET_EVENT\n", __FUNCTION__);
-			//ret = dvb_video_get_event(av7110, parg, file->flags);
+
+			return player->get_event((struct video_event *)data) - 1;
 		break;
 		case VIDEO_GET_SIZE:
 			printf("%s: VIDEO_GET_SIZE\n", __FUNCTION__);
@@ -499,10 +500,10 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 			if (player->have_event())
 				*reventsp = POLLPRI;
 
-			if ((fi->flags & O_ACCMODE) != O_RDONLY)
+			if (dvb_hisi_open_mask & (1 << type))
 			{
 				pthread_mutex_lock(&m_video);
-				*reventsp |= (POLLOUT | POLLIN);
+				*reventsp |= (POLLOUT | POLLWRNORM);
 				pthread_mutex_unlock(&m_video);
 			}
 		break;

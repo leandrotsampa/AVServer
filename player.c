@@ -100,6 +100,11 @@ struct s_player {
 	bool IsSyncEnabled;
 	bool IsMute;
 
+	bool e_size;
+	bool e_framerate;
+	bool e_progressive;
+	struct video_event events[3];
+
 	pthread_mutex_t m_event;
 	pthread_mutex_t m_write;
 
@@ -236,6 +241,61 @@ void player_pes2ts(struct s_player *p, HI_U8 *to_data, char *from_data, int size
 	}
 }
 
+int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOID *para)
+{
+	if (enEvent == HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME)
+	{
+		struct video_event event;
+		struct s_player *player = (struct s_player *)player_ops.priv;
+		HI_UNF_VIDEO_FRAME_INFO_S *vFram = (HI_UNF_VIDEO_FRAME_INFO_S *)para;
+
+		/** VIDEO_EVENT_SIZE_CHANGED **/
+		if (vFram->u32AspectWidth == 4 && vFram->u32AspectHeight == 3)
+			event.u.size.aspect_ratio = VIDEO_FORMAT_4_3;
+		else if (vFram->u32AspectWidth == 16 && vFram->u32AspectHeight == 9)
+			event.u.size.aspect_ratio = VIDEO_FORMAT_16_9;
+		else if (vFram->u32AspectWidth == 221 && vFram->u32AspectHeight == 1)
+			event.u.size.aspect_ratio = VIDEO_FORMAT_221_1;
+
+		event.u.size.h = vFram->u32Height;
+		event.u.size.w = vFram->u32Width;
+
+		/** VIDEO_EVENT_FRAME_RATE_CHANGED **/
+		event.u.frame_rate = (vFram->stFrameRate.u32fpsInteger * 1000) - 500;
+
+		/** Check changes. **/
+		pthread_mutex_lock(&player->m_event);
+		/** VIDEO_EVENT_SIZE_CHANGED **/
+		if (player->events[0].u.size.aspect_ratio != event.u.size.aspect_ratio ||
+			player->events[0].u.size.h != event.u.size.h ||
+			player->events[0].u.size.w != event.u.size.w)
+			{
+				player->events[0].u.size.aspect_ratio = event.u.size.aspect_ratio;
+				player->events[0].u.size.h = event.u.size.h;
+				player->events[0].u.size.w = event.u.size.w;
+				player->e_size = true;
+			}
+
+		/** VIDEO_EVENT_FRAME_RATE_CHANGED **/
+		if (player->events[1].u.frame_rate != event.u.frame_rate)
+		{
+			player->events[1].u.frame_rate = event.u.frame_rate;
+			player->e_framerate = true;
+		}
+
+		/** VIDEO_EVENT_PROGRESSIVE_CHANGED **/
+		event.u.frame_rate = vFram->bProgressive == HI_FALSE ? true : false;
+		if (player->events[2].u.frame_rate != event.u.frame_rate)
+		{
+			player->events[2].u.frame_rate = event.u.frame_rate;
+			player->e_progressive = true;
+		}
+		pthread_mutex_unlock(&player->m_event);
+	}
+
+    return HI_SUCCESS;
+}
+
 bool player_create(void)
 {
 	printf("[INFO] %s -> called.\n", __FUNCTION__);
@@ -365,8 +425,13 @@ bool player_create(void)
 
 	if (HI_UNF_DMX_CreateTSBuffer(HI_UNF_DMX_PORT_RAM_0, 0x1000000, &player->hTsBuffer) != HI_SUCCESS)
 		printf("[WARNING] %s -> Failed to create TS buffer.\n", __FUNCTION__);
+	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
+		printf("[WARNING] %s -> Failed to register player event callback.\n", __FUNCTION__);
 
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
+	player->events[0].type = VIDEO_EVENT_SIZE_CHANGED;
+	player->events[1].type = VIDEO_EVENT_FRAME_RATE_CHANGED;
+	player->events[2].type = 16; /* VIDEO_EVENT_PROGRESSIVE_CHANGED */
 	pthread_mutex_init(&player->m_event, NULL);
 	pthread_mutex_init(&player->m_write, NULL);
 
@@ -432,6 +497,7 @@ void player_destroy(void)
 
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL);
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
+		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME);
 
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
 		if (player->hTsBuffer)
@@ -1023,11 +1089,13 @@ bool player_get_status(int dev_type, void *data)
 			if (!status)
 				return false;
 
+			pthread_mutex_lock(&player->m_event);
 			status->video_blank		= player->IsBlank;		/* blank video on freeze? */
 			status->play_state		= player->VideoState;	/* current state of playback */
 			status->stream_source	= player->PlayerMode;	/* current source (demux/memory) */
 			status->video_format	= player->VideoFormat;	/* current aspect ratio of stream */
 			status->display_format	= player->DisplayFormat;/* selected cropping mode */
+			pthread_mutex_unlock(&player->m_event);
 		}
 		break;
 		default:
@@ -1040,7 +1108,66 @@ bool player_get_status(int dev_type, void *data)
 
 bool player_have_event(void)
 {
-	return false;
+	printf("[INFO] %s() -> called.\n", __FUNCTION__);
+	bool IsHaveEvent = false;
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	pthread_mutex_lock(&player->m_event);
+	IsHaveEvent = (player->e_size || player->e_framerate || player->e_progressive);
+	pthread_mutex_unlock(&player->m_event);
+
+	return IsHaveEvent;
+}
+
+bool player_get_event(struct video_event *event)
+{
+	printf("[INFO] %s() -> called.\n", __FUNCTION__);
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	pthread_mutex_lock(&player->m_event);
+	if (player->e_size)
+	{
+		event->type = player->events[0].type;
+		event->u.size.aspect_ratio = player->events[0].u.size.aspect_ratio;
+		event->u.size.h = player->events[0].u.size.h;
+		event->u.size.w = player->events[0].u.size.w;
+
+		player->e_size = false;
+	}
+	else if (player->e_framerate)
+	{
+		event->type = player->events[1].type;
+		event->u.frame_rate = player->events[1].u.frame_rate;
+
+		player->e_framerate = false;
+	}
+	else if (player->e_progressive)
+	{
+		event->type = player->events[2].type;
+		event->u.frame_rate = player->events[2].u.frame_rate;
+
+		player->e_progressive = false;
+	}
+	else
+	{
+		pthread_mutex_unlock(&player->m_event);
+		return false;
+	}
+	pthread_mutex_unlock(&player->m_event);
+
+	return true;
 }
 
 bool player_get_vsize(video_size_t *vsize)
@@ -1234,6 +1361,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.channel			= player_channel;
 	player_ops.status			= player_get_status;
 	player_ops.have_event		= player_have_event;
+	player_ops.get_event		= player_get_event;
 	player_ops.get_vsize		= player_get_vsize;
 	player_ops.get_framerate	= player_get_framerate;
 	player_ops.get_progressive	= player_get_progressive;

@@ -1,4 +1,5 @@
 #include <AVServer.h>
+#include <ring_buf.h>
 #include <hi_adp_mpi.h>
 #include <hi_common.h>
 #include <hi_unf_avplay.h>
@@ -108,10 +109,12 @@ struct s_player {
 	pthread_mutex_t m_event;
 	pthread_mutex_t m_write;
 
-	char *aheader;
-	char *vheader;
-	size_t asize;
-	size_t vsize;
+	ring_buffer *b_audio;
+	unsigned int pkt_asize;
+#define AUDIO_BUFFER_SIZE (64 * 1024)
+	ring_buffer *b_video;
+	unsigned int pkt_vsize;
+#define VIDEO_BUFFER_SIZE (2048 * 1024)
 
 	unsigned int hPlayer;
 	unsigned int hWindow;
@@ -270,7 +273,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 			player->events[0].u.size.h != event.u.size.h ||
 			player->events[0].u.size.w != event.u.size.w)
 			{
-				player->events[0].u.size.aspect_ratio = event.u.size.aspect_ratio;
+				player->events[0].u.size.aspect_ratio = player->VideoFormat = event.u.size.aspect_ratio;
 				player->events[0].u.size.h = event.u.size.h;
 				player->events[0].u.size.w = event.u.size.w;
 				player->e_size = true;
@@ -435,6 +438,10 @@ bool player_create(void)
 	pthread_mutex_init(&player->m_event, NULL);
 	pthread_mutex_init(&player->m_write, NULL);
 
+	/* Create buffer for use by Player in RAM mode. */
+	player->b_audio = create_buf(AUDIO_BUFFER_SIZE);
+	player->b_video = create_buf(VIDEO_BUFFER_SIZE);
+
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
 	player->AudioPid		= 0x1FFFF;
@@ -499,6 +506,8 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME);
 
+		free_buf(player->b_audio);
+		free_buf(player->b_video);
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
 		if (player->hTsBuffer)
 			HI_UNF_DMX_DestroyTSBuffer(player->hTsBuffer);
@@ -733,6 +742,30 @@ bool player_set_mode(int mode)
 	else if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
 		return false;
 
+	/** Reset buffer for RAM **/
+	if (mode == 1)
+	{
+		char *buf;
+		player->AudioCounter = 0;
+		player->VideoCounter = 0;
+		player->pkt_asize = 0;
+		player->pkt_vsize = 0;
+
+		if (get_max_read_size(player->b_audio) > 0)
+		{
+			buf = malloc(get_max_read_size(player->b_audio));
+			read_buf(player->b_audio, buf, get_max_read_size(player->b_audio));
+			free(buf);
+		}
+
+		if (get_max_read_size(player->b_video) > 0)
+		{
+			buf = malloc(get_max_read_size(player->b_video));
+			read_buf(player->b_video, buf, get_max_read_size(player->b_video));
+			free(buf);
+		}
+	}
+
 	enToPortId = (mode != 0 /* DEMUX */ ? HI_UNF_DMX_PORT_RAM_0 : (HI_UNF_DMX_PORT_TSI_0 + player->TunerID));
 	if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
 	{
@@ -774,8 +807,6 @@ bool player_set_mode(int mode)
 	}*/
 
 	player->PlayerMode = mode;
-	player->AudioCounter = 0;
-	player->VideoCounter = 0;
 
 	return true;
 }
@@ -1249,6 +1280,11 @@ bool player_get_pts(int dev_type, long long *pts)
 
 int player_write(int dev_type, const char *buf, size_t size)
 {
+	bool IsHeader;
+	unsigned char c_s;
+	unsigned char c_e;
+	ring_buffer *rbuf;
+	unsigned int *pkt_size;
 	HI_UNF_STREAM_BUF_S sBuf;
 	unsigned char h = buf[0];
 	unsigned char e = buf[1];
@@ -1265,78 +1301,67 @@ int player_write(int dev_type, const char *buf, size_t size)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
-		{
-			int data_size = player->asize + size;
-			int ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
-
-			if (h == 0x00 && e == 0x00 && a == 0x01 && d >= AUDIO_STREAM_S && d <= AUDIO_STREAM_E)
-			{
-				if (player->aheader)
-					free(player->aheader);
-
-				player->aheader = malloc(size);
-				memcpy(player->aheader, buf, size);
-				player->asize = size;
-
-				return size;
-			}
-
-			pthread_mutex_lock(&player->m_write);
-			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
-			{
-				char *from = malloc(data_size);
-
-				memcpy(from, player->aheader, player->asize);
-				memcpy(&from[player->asize], buf, size);
-				player_pes2ts(player, sBuf.pu8Data, from, data_size);
-
-				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
-				{
-					player->asize = 0;
-					pthread_mutex_unlock(&player->m_write);
-					return size;
-				}
-			}
-			pthread_mutex_unlock(&player->m_write);
-		}
+			c_s = AUDIO_STREAM_S;
+			c_e = AUDIO_STREAM_E;
+			rbuf = player->b_audio;
+			pkt_size = &player->pkt_asize;
 		break;
 		case DEV_VIDEO:
-		{
-			int data_size = player->vsize + size;
-			int ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
-
-			if (h == 0x00 && e == 0x00 && a == 0x01 && d >= VIDEO_STREAM_S && d <= VIDEO_STREAM_E)
-			{
-				if (player->vheader)
-					free(player->vheader);
-
-				player->vheader = malloc(size);
-				memcpy(player->vheader, buf, size);
-				player->vsize = size;
-
-				return size;
-			}
-
-			pthread_mutex_lock(&player->m_write);
-			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
-			{
-				char *from = malloc(data_size);
-
-				memcpy(from, player->vheader, player->vsize);
-				memcpy(&from[player->vsize], buf, size);
-				player_pes2ts(player, sBuf.pu8Data, from, data_size);
-
-				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
-				{
-					player->vsize = 0;
-					pthread_mutex_unlock(&player->m_write);
-					return size;
-				}
-			}
-			pthread_mutex_unlock(&player->m_write);
-		}
+			c_s = VIDEO_STREAM_S;
+			c_e = VIDEO_STREAM_E;
+			rbuf = player->b_video;
+			pkt_size = &player->pkt_vsize;
+		break;
+		default:
+			return size;
 		break;
 	}
+
+	int data_size = get_max_read_size(rbuf) + size;
+	int ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
+
+	if (h == 0x00 && e == 0x00 && a == 0x01 && d >= c_s && d <= c_e)
+	{
+		if (get_max_read_size(rbuf) > 0)
+		{
+			IsHeader = true;
+			data_size = get_max_read_size(rbuf);
+			ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
+		}
+		else
+		{
+			write_to_buf(rbuf, (char *)buf, size);
+			*pkt_size = ((buf[4]<<8) | buf[5]) + 6;
+			return size;
+		}
+	}
+	else if (*pkt_size != data_size)
+	{
+		if (get_max_write_size(rbuf) < size)
+			printf("[WARNING] %s: Need more space for device type %d (Free %d Necessary %d).\n", __FUNCTION__, dev_type, get_max_write_size(rbuf), size);
+		write_to_buf(rbuf, (char *)buf, size);
+		return size;
+	}
+
+	pthread_mutex_lock(&player->m_write);
+	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
+	{
+		char *from = malloc(data_size);
+
+		if (!read_buf(rbuf, from, IsHeader ? data_size : data_size - size))
+			printf("[ERROR] %s: Failed to read buffer for device type %d.\n", __FUNCTION__, dev_type);
+		if (!IsHeader)
+			memcpy(&from[data_size - size], buf, size);
+
+		player_pes2ts(player, sBuf.pu8Data, from, data_size);
+
+		if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS && !IsHeader)
+		{
+			pthread_mutex_unlock(&player->m_write);
+			return size;
+		}
+	}
+	pthread_mutex_unlock(&player->m_write);
 
 	return 0;
 }

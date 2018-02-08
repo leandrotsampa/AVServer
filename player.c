@@ -438,11 +438,11 @@ bool player_create(void)
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
 	player->AudioPid		= 0x1FFFF;
-	player->AudioType		= 10; /* MP3 */
+	player->AudioType		= 1; /* MPEG */
 	player->AudioChannel	= 0;
 	player->AudioState		= 0;
 	player->VideoPid		= 0x1FFFF;
-	player->VideoType		= 1; /* H264 */
+	player->VideoType		= 0; /* MPEG2 */
 	player->VideoState		= 0;
 	player->VideoFormat		= 1;
 	player->DisplayFormat	= 0;
@@ -1108,7 +1108,6 @@ bool player_get_status(int dev_type, void *data)
 
 bool player_have_event(void)
 {
-	printf("[INFO] %s() -> called.\n", __FUNCTION__);
 	bool IsHaveEvent = false;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -40,6 +41,9 @@ struct class_ops {
 	bool (*get_framerate)(int *);
 	bool (*get_progressive)(int *);
 	bool (*get_pts)(int, long long *);
+
+	/** Other's operations **/
+	int (*write)(int, const char *, size_t);
 
 	/** Private data **/
 	void *priv;

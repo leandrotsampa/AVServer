@@ -53,6 +53,7 @@ enum {
 };
 
 static unsigned dvb_hisi_open_mask;
+static pthread_mutex_t m_tswrite;
 
 static int dvb_hisi_file_type(const char *path)
 {
@@ -208,23 +209,29 @@ static int dvb_hisi_read(const char *path, char *buf, size_t size, off_t offset,
 	return dvb_hisi_do_read(buf, size, offset);
 }
 
-static int dvb_hisi_do_write(const char *buf, size_t size, off_t offset)
-{
-	//memcpy(dvb_hisi_buf + offset, buf, size);
-
-	return size;
-}
-
 static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
-	//struct fuse_context *cxt = fuse_get_context();
-	//struct class_ops *player = (struct class_ops *)cxt->private_data;
+	int ret = -EINVAL;
+	int type = dvb_hisi_file_type(path);
+	struct fuse_context *cxt = fuse_get_context();
+	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	if (dvb_hisi_file_type(path) < DVB_FILE)
+	if (!player)
 		return -EINVAL;
 
-	printf("%s -> Type %d and Size %d.\n", __FUNCTION__, dvb_hisi_file_type(path), size);
-	return dvb_hisi_do_write(buf, size, offset);
+	pthread_mutex_lock(&m_tswrite);
+	switch (type)
+	{
+		case DVB_AUDIO_DEV:
+			ret = player->write(DEV_AUDIO, buf, size);
+		break;
+		case DVB_VIDEO_DEV:
+			ret = player->write(DEV_VIDEO, buf, size);
+		break;
+	}
+	pthread_mutex_unlock(&m_tswrite);
+
+	return ret;
 }
 
 static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
@@ -454,9 +461,22 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 
 static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
 {
-	*reventsp = POLLOUT | POLLIN; //TODO: connect with avplayer mode
-	//struct fuse_context *cxt = fuse_get_context();
-	//struct class_ops *player = (struct class_ops *)cxt->private_data;
+	//const struct timespec interval = { 0, 250000000 };
+
+	switch (dvb_hisi_file_type(path))
+	{
+		case DVB_AUDIO_DEV:
+		case DVB_VIDEO_DEV:
+			pthread_mutex_lock(&m_tswrite);
+			*reventsp = POLLOUT | POLLIN; //TODO: connect with avplayer mode
+			pthread_mutex_unlock(&m_tswrite);
+
+			//nanosleep(&interval, NULL);
+		break;
+		default:
+			return -EINVAL;
+		break;
+	}
 
 	return 0;
 }
@@ -476,5 +496,12 @@ static struct fuse_operations dvb_hisi_oper = {
 
 int main(int argc, char *argv[])
 {
+	errno = pthread_mutex_init(&m_tswrite, NULL);
+	if (errno)
+	{
+		perror("pthread_mutex_init");
+		return 1;
+	}
+
 	return fuse_main(argc, argv, &dvb_hisi_oper, "Leandro" /*NULL*/);
 }

@@ -51,6 +51,29 @@
 #define VIDEO_STREAMTYPE_DIVX4		 14
 #define VIDEO_STREAMTYPE_DIVX5		 15
 
+#define PROG_STREAM_MAP  0xBC
+#ifndef PRIVATE_STREAM1
+#define PRIVATE_STREAM1  0xBD
+#endif
+#define PADDING_STREAM   0xBE
+#ifndef PRIVATE_STREAM2
+#define PRIVATE_STREAM2  0xBF
+#endif
+#define AUDIO_STREAM_S   0xC0
+#define AUDIO_STREAM_E   0xDF
+#define VIDEO_STREAM_S   0xE0
+#define VIDEO_STREAM_E   0xEF
+#define ECM_STREAM       0xF0
+#define EMM_STREAM       0xF1
+#define DSM_CC_STREAM    0xF2
+#define ISO13522_STREAM  0xF3
+#define PROG_STREAM_DIR  0xFF
+
+#define TS_SIZE          188
+
+#define MAX_PLENGTH      0xFFFF
+#define MMAX_PLENGTH     (8*MAX_PLENGTH)
+
 #define MAX_ADAPTER	4
 #define PLAYER_DEMUX_PORT 4
 
@@ -61,10 +84,12 @@ struct s_player {
 	int TunerID;
 	int PlayerMode;		/* 0 demux, 1 memory */
 	int AudioPid;		/* unknown pid */
+	uint8_t AudioCounter;
 	int AudioType;
 	int AudioChannel;	/* 0 stereo, 1 left, 2 right */
 	int AudioState;		/* 0 stoped, 1 playing, 2 paused */
 	int VideoPid;		/* unknown pid */
+	uint8_t VideoCounter;
 	int VideoType;
 	int VideoState;		/* 0 stoped, 1 playing, 2 freezed */
 	int VideoFormat;	/* 0 4:3, 1 16:9, 2 2.21:1 */
@@ -75,9 +100,15 @@ struct s_player {
 	bool IsSyncEnabled;
 	bool IsMute;
 
+	char *aheader;
+	char *vheader;
+	size_t asize;
+	size_t vsize;
+
 	unsigned int hPlayer;
 	unsigned int hWindow;
 	unsigned int hTrack;
+	unsigned int hTsBuffer;
 };
 
 void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
@@ -105,6 +136,100 @@ void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
 
 			break;
 		}
+	}
+}
+
+void player_pes2ts(struct s_player *p, HI_U8 *to_data, char *from_data, int size)
+{
+	int i, rest;
+	uint16_t pid;
+	uint8_t *cc;
+	uint8_t ts[TS_SIZE];
+	int pes_start = 1;
+	unsigned int packetlen = 0;
+	//int tspacketlen = (size / 184) * 188 + ((size % 184 > 0) ? 188 : 0);
+
+	// check for valid PES signature in PES header
+	if ((from_data[0] == 0x00) && (from_data[1] == 0x00) && (from_data[2] == 0x01))
+	{
+		packetlen = ((from_data[4]<<8) | from_data[5]) + 6;
+		if (packetlen > MMAX_PLENGTH)
+			printf("[WARNING] %s: IPACKS changed? packet length was %d, maximum: %d (This should not happen! Please report!)\n", __FUNCTION__, packetlen, MMAX_PLENGTH);
+
+		if (size != (int)packetlen && !((from_data[3] >= VIDEO_STREAM_S) && (from_data[3] <= VIDEO_STREAM_E)))
+			printf("[WARNING] %s Type 0x%x: The size received (%d) is differ from PES header (%d).\n", __FUNCTION__, from_data[3], size, packetlen);
+
+		// check for valid stream id type: is it video or audio or unknown?
+		if (((from_data[3] >= AUDIO_STREAM_S) && (from_data[3] <= AUDIO_STREAM_E)) || from_data[3] == PRIVATE_STREAM1)
+		{
+			pid = p->AudioPid;
+			cc = &p->AudioCounter;
+		}
+		else
+		{
+			if ((from_data[3] >= VIDEO_STREAM_S) && (from_data[3] <= VIDEO_STREAM_E))
+			{
+				pid = p->VideoPid;
+				cc = &p->VideoCounter;
+				/* Fix Video PES size. */
+				from_data[4] = (uint8_t)(((size - 6) & 0xFF00) >> 8);
+				from_data[5] = (uint8_t)((size - 6) & 0x00FF);
+			}
+			else
+			{
+				printf("[WARNING] %s: Unknown stream id: neither video nor audio type.\n", __FUNCTION__);
+				return;
+			}
+		}
+	}
+	else
+	{
+		// no valid PES signature was found
+		printf("[WARNING] %s: No valid PES signature found. This should not happen.\n", __FUNCTION__);
+		return;
+	}
+
+	/* divide PES packet into small TS packets */
+	for (i=0; i < size / 184; i++)
+	{
+		ts[0] = 0x47;       //SYNC Byte
+		if (pes_start)
+			ts[1] = 0x40;   // Set PUSI or
+		else
+			ts[1] = 0x00;   // clear PUSI,  TODO: PID (high) is missing
+
+		ts[2] = pid & 0xFF; // PID (low)
+		ts[3] = 0x10 | ((*cc) & 0x0F); // No adaptation field, payload only, continuity counter
+
+		memcpy(ts + 4, from_data + i * 184, 184);
+		memcpy(&to_data[i * TS_SIZE], ts, TS_SIZE);
+		++(*cc);
+		pes_start = 0;
+	}
+
+	rest = size % 184;
+	if (rest > 0)
+	{
+		ts[0] = 0x47;       //SYNC Byte
+		if (pes_start)
+			ts[1] = 0x40;   // Set PUSI or
+		else
+			ts[1] = 0x00;   // clear PUSI,  TODO: PID (high) is missing
+
+		ts[2] = pid & 0xFF; // PID (low)
+		ts[3] = 0x30 | ((*cc) & 0x0F); // adaptation field, payload, continuity counter
+		++(*cc);
+		ts[4] = 183 - rest;
+
+		if (ts[4] > 0)
+		{
+			ts[5] = 0x00;
+			memset(ts + 6, 0xFF, ts[4] - 1);
+		}
+
+		memcpy(ts + 5 + ts[4], from_data + i * 184, rest);
+		memcpy(&to_data[i * TS_SIZE], ts, TS_SIZE);
+		pes_start = 0;
 	}
 }
 
@@ -235,6 +360,9 @@ bool player_create(void)
 		goto SND_DETACH;
 	}
 
+	if (HI_UNF_DMX_CreateTSBuffer(HI_UNF_DMX_PORT_RAM_0, 0x1000000, &player->hTsBuffer) != HI_SUCCESS)
+		printf("[WARNING] %s -> Failed to create TS buffer.\n", __FUNCTION__);
+
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
 
 	player->IsCreated		= true;
@@ -293,10 +421,16 @@ void player_destroy(void)
 
 	if (player && player->IsCreated)
 	{
-		printf("[INFO] %s shit.\n", __FUNCTION__);
-		return;
-		//hi_player_audio_stop();
-		//hi_player_video_stop(HI_UNF_AVPLAY_STOP_MODE_BLACK);
+		HI_UNF_AVPLAY_STOP_OPT_S stStop;
+		stStop.u32TimeoutMs = 0;
+		stStop.enMode = HI_UNF_AVPLAY_STOP_MODE_BLACK;
+
+		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL);
+		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
+
+		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
+		if (player->hTsBuffer)
+			HI_UNF_DMX_DestroyTSBuffer(player->hTsBuffer);
 
 		HI_UNF_SND_Detach(player->hTrack, player->hPlayer);
 		HI_UNF_SND_DestroyTrack(player->hTrack);
@@ -343,12 +477,12 @@ bool player_set_type(int dev_type, int type)
 
 			if (player->AudioType == type)
 				return true;
-			else if (player->AudioState == 1)
+/*			else if (player->AudioState == 1)
 			{
 				printf("[ERROR] %s -> Only can change Audio Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
-
+*/
 			switch (type)
 			{
 				case AUDIO_STREAMTYPE_AC3:
@@ -396,12 +530,12 @@ bool player_set_type(int dev_type, int type)
 
 			if (player->VideoType == type)
 				return true;
-			else if (player->VideoState == 1)
+/*			else if (player->VideoState == 1)
 			{
 				printf("[ERROR] %s -> Only can change Video Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
-
+*/
 			switch (type)
 			{
 				case VIDEO_STREAMTYPE_MPEG2:
@@ -543,14 +677,13 @@ bool player_set_mode(int mode)
 		return false;
 	}
 
-	if (stAvplayAttr.stStreamAttr.enStreamType != (mode != 0 ? HI_UNF_AVPLAY_STREAM_TYPE_ES : HI_UNF_AVPLAY_STREAM_TYPE_TS))
+	if (enToPortId == HI_UNF_DMX_PORT_RAM_0)
 	{
-		stAvplayAttr.stStreamAttr.enStreamType = (mode != 0 ? HI_UNF_AVPLAY_STREAM_TYPE_ES : HI_UNF_AVPLAY_STREAM_TYPE_TS);
-
-		if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
-			printf("[ERROR] %s -> Failed to change Stream Mode.\n", __FUNCTION__);
+		if (!(player->AudioPid > 0 && player->AudioPid < 0x1FFFF))
+			player_set_pid(DEV_AUDIO, 100);
+		if (!(player->VideoPid > 0 && player->VideoPid < 0x1FFFF))
+			player_set_pid(DEV_VIDEO, 101);
 	}
-
 	/*switch (dev_type)
 	{
 		case DEV_AUDIO:
@@ -570,6 +703,8 @@ bool player_set_mode(int mode)
 	}*/
 
 	player->PlayerMode = mode;
+	player->AudioCounter = 0;
+	player->VideoCounter = 0;
 
 	return true;
 }
@@ -682,13 +817,20 @@ bool player_pause(int dev_type)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (player->AudioState == 2)
+				return true;
+			else if (player->AudioState == 0)
+				return false;
+
 			player->AudioState = 2;
 		break;
 		case DEV_VIDEO:
+			if (player->VideoState == 2)
+				return true;
+			else if (player->VideoState == 0)
+				return false;
+
 			player->VideoState = 2;
-		break;
-		default:
-			return false;
 		break;
 	}
 
@@ -709,9 +851,19 @@ bool player_resume(int dev_type)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (player->AudioState == 1)
+				return true;
+			else if (player->AudioState == 0)
+				return false;
+
 			player->AudioState = 1;
 		break;
 		case DEV_VIDEO:
+			if (player->VideoState == 1)
+				return true;
+			else if (player->VideoState == 0)
+				return false;
+
 			player->VideoState = 1;
 		break;
 		default:
@@ -926,6 +1078,7 @@ bool player_get_progressive(int *progressive)
 bool player_get_pts(int dev_type, long long *pts)
 {
 	printf("[INFO] %s(%d, PTS) -> called.\n", __FUNCTION__, dev_type);
+	HI_UNF_AVPLAY_STATUS_INFO_S stStatusInfo;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -934,7 +1087,106 @@ bool player_get_pts(int dev_type, long long *pts)
 		return false;
 	}
 
+	if (HI_UNF_AVPLAY_GetStatusInfo(player->hPlayer, &stStatusInfo) != HI_SUCCESS)
+		return HI_FAILURE;
+
+	if (dev_type == DEV_AUDIO && stStatusInfo.stSyncStatus.u32LastAudPts != HI_INVALID_PTS)
+		player->LastPTS = stStatusInfo.stSyncStatus.u32LastAudPts;
+	else if (dev_type == DEV_VIDEO && stStatusInfo.stSyncStatus.u32LastVidPts != HI_INVALID_PTS)
+		player->LastPTS = stStatusInfo.stSyncStatus.u32LastVidPts;
+
+	*pts = player->LastPTS * 90;
+
 	return true;
+}
+
+int player_write(int dev_type, const char *buf, size_t size)
+{
+	HI_UNF_STREAM_BUF_S sBuf;
+	unsigned char h = buf[0];
+	unsigned char e = buf[1];
+	unsigned char a = buf[2];
+	unsigned char d = buf[3];
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return -1;
+	}
+
+	switch (dev_type)
+	{
+		case DEV_AUDIO:
+		{
+			int data_size = player->asize + size;
+			int ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
+
+			if (h == 0x00 && e == 0x00 && a == 0x01 && d >= AUDIO_STREAM_S && d <= AUDIO_STREAM_E)
+			{
+				if (player->aheader)
+					free(player->aheader);
+
+				player->aheader = malloc(size);
+				memcpy(player->aheader, buf, size);
+				player->asize = size;
+
+				return size;
+			}
+
+			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
+			{
+				char *from = malloc(data_size);
+
+				memcpy(from, player->aheader, player->asize);
+				memcpy(&from[player->asize], buf, size);
+				player_pes2ts(player, sBuf.pu8Data, from, data_size);
+
+				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
+				{
+					player->asize = 0;
+					return size;
+				}
+			}
+			return size;
+		}
+		break;
+		case DEV_VIDEO:
+		{
+			int data_size = player->vsize + size;
+			int ts_total_size = (data_size / 184) * TS_SIZE + ((data_size % 184 > 0) ? TS_SIZE : 0);
+
+			if (h == 0x00 && e == 0x00 && a == 0x01 && d >= VIDEO_STREAM_S && d <= VIDEO_STREAM_E)
+			{
+				if (player->vheader)
+					free(player->vheader);
+
+				player->vheader = malloc(size);
+				memcpy(player->vheader, buf, size);
+				player->vsize = size;
+
+				return size;
+			}
+
+			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
+			{
+				char *from = malloc(data_size);
+
+				memcpy(from, player->vheader, player->vsize);
+				memcpy(&from[player->vsize], buf, size);
+				player_pes2ts(player, sBuf.pu8Data, from, data_size);
+
+				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
+				{
+					player->vsize = 0;
+					return size;
+				}
+			}
+		}
+		break;
+	}
+
+	return 0;
 }
 
 struct class_ops *player_get_ops(void)
@@ -959,6 +1211,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.get_framerate	= player_get_framerate;
 	player_ops.get_progressive	= player_get_progressive;
 	player_ops.get_pts			= player_get_pts;
+	player_ops.write			= player_write;
 
 	return &player_ops;
 }

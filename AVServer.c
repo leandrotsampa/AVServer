@@ -37,7 +37,6 @@
 #include <unistd.h>
 #include <time.h>
 #include <errno.h>
-#include <pthread.h>
 #include <poll.h>
 #include <AVServer.h>
 
@@ -53,7 +52,10 @@ enum {
 };
 
 static unsigned dvb_hisi_open_mask;
-static pthread_mutex_t m_tswrite;
+
+/* Mutex for Player */
+static pthread_mutex_t m_audio;
+static pthread_mutex_t m_video;
 
 static int dvb_hisi_file_type(const char *path)
 {
@@ -98,15 +100,15 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 	switch (dvb_hisi_file_type(path))
 	{
 		case DVB_ROOT:
-			stbuf->st_mode = S_IFDIR | 0755;
+			stbuf->st_mode  = S_IFDIR | 0755;
 			stbuf->st_nlink = 2;
 		break;
 		case DVB_FILE:
 		case DVB_AUDIO_DEV:
 		case DVB_VIDEO_DEV:
-			stbuf->st_mode = S_IFREG | 0644;
+			stbuf->st_mode  = S_IFREG | 0644;
+			stbuf->st_size  = 0;
 			stbuf->st_nlink = 1;
-			//stbuf->st_size = dvb_hisi_size;
 		break;
 		case DVB_NONE:
 			return -ENOENT;
@@ -136,6 +138,18 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 					return -EBUSY;
 
 				dvb_hisi_open_mask |= (1 << type);
+
+				/* fsel files are nonseekable somewhat pipe-like files which
+				 * gets filled up periodically by producer thread and consumed
+				 * on read.  Tell FUSE as such.
+				 */
+				fi->fh = type;
+				fi->direct_io = 1;
+				fi->nonseekable = 1;
+				/* Make cache persistent even if file is closed,
+				 *  this makes it easier to see the effects.
+				 */
+				fi->keep_cache = 1;
 			break;
 			default:
 			break;
@@ -219,17 +233,19 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	if (!player)
 		return -EINVAL;
 
-	pthread_mutex_lock(&m_tswrite);
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
+			pthread_mutex_lock(&m_audio);
 			ret = player->write(DEV_AUDIO, buf, size);
+			pthread_mutex_unlock(&m_audio);
 		break;
 		case DVB_VIDEO_DEV:
+			pthread_mutex_lock(&m_video);
 			ret = player->write(DEV_VIDEO, buf, size);
+			pthread_mutex_unlock(&m_video);
 		break;
 	}
-	pthread_mutex_unlock(&m_tswrite);
 
 	return ret;
 }
@@ -461,20 +477,37 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 
 static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
 {
-	//const struct timespec interval = { 0, 250000000 };
+	int type = dvb_hisi_file_type(path);
+	struct fuse_context *cxt = fuse_get_context();
+	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	switch (dvb_hisi_file_type(path))
+	if (!player)
+	{
+		*reventsp = -EINVAL;
+		return 0;
+	}
+	else
+		*reventsp = 0;
+
+	switch (type)
 	{
 		case DVB_AUDIO_DEV:
+			pthread_mutex_lock(&m_audio);
+			*reventsp |= (POLLOUT | POLLWRNORM);
+			pthread_mutex_unlock(&m_audio);
 		case DVB_VIDEO_DEV:
-			pthread_mutex_lock(&m_tswrite);
-			*reventsp = POLLOUT | POLLIN; //TODO: connect with avplayer mode
-			pthread_mutex_unlock(&m_tswrite);
+			if (player->have_event())
+				*reventsp = POLLPRI;
 
-			//nanosleep(&interval, NULL);
+			if ((fi->flags & O_ACCMODE) != O_RDONLY)
+			{
+				pthread_mutex_lock(&m_video);
+				*reventsp |= (POLLOUT | POLLIN);
+				pthread_mutex_unlock(&m_video);
+			}
 		break;
 		default:
-			return -EINVAL;
+			*reventsp = -EINVAL;
 		break;
 	}
 
@@ -496,12 +529,8 @@ static struct fuse_operations dvb_hisi_oper = {
 
 int main(int argc, char *argv[])
 {
-	errno = pthread_mutex_init(&m_tswrite, NULL);
-	if (errno)
-	{
-		perror("pthread_mutex_init");
-		return 1;
-	}
+	pthread_mutex_init(&m_audio, NULL);
+	pthread_mutex_init(&m_video, NULL);
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, "Leandro" /*NULL*/);
 }

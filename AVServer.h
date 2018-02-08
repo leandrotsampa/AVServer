@@ -11,6 +11,7 @@
 #include <linux/ioctl.h>
 #include <linux/dvb/audio.h>
 #include <linux/dvb/video.h>
+#include <pthread.h>
 
 enum {
 	DEV_AUDIO,
@@ -37,6 +38,7 @@ struct class_ops {
     bool (*sync)(bool);
 	bool (*channel)(int);
 	bool (*status)(int, void *);
+	bool (*have_event)(void);
 	bool (*get_vsize)(video_size_t *);
 	bool (*get_framerate)(int *);
 	bool (*get_progressive)(int *);

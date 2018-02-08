@@ -100,6 +100,9 @@ struct s_player {
 	bool IsSyncEnabled;
 	bool IsMute;
 
+	pthread_mutex_t m_event;
+	pthread_mutex_t m_write;
+
 	char *aheader;
 	char *vheader;
 	size_t asize;
@@ -364,6 +367,8 @@ bool player_create(void)
 		printf("[WARNING] %s -> Failed to create TS buffer.\n", __FUNCTION__);
 
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
+	pthread_mutex_init(&player->m_event, NULL);
+	pthread_mutex_init(&player->m_write, NULL);
 
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
@@ -1033,6 +1038,11 @@ bool player_get_status(int dev_type, void *data)
 	return true;
 }
 
+bool player_have_event(void)
+{
+	return false;
+}
+
 bool player_get_vsize(video_size_t *vsize)
 {
 	printf("[INFO] %s() -> called.\n", __FUNCTION__);
@@ -1090,10 +1100,21 @@ bool player_get_pts(int dev_type, long long *pts)
 	if (HI_UNF_AVPLAY_GetStatusInfo(player->hPlayer, &stStatusInfo) != HI_SUCCESS)
 		return HI_FAILURE;
 
-	if (dev_type == DEV_AUDIO && stStatusInfo.stSyncStatus.u32LastAudPts != HI_INVALID_PTS)
-		player->LastPTS = stStatusInfo.stSyncStatus.u32LastAudPts;
-	else if (dev_type == DEV_VIDEO && stStatusInfo.stSyncStatus.u32LastVidPts != HI_INVALID_PTS)
-		player->LastPTS = stStatusInfo.stSyncStatus.u32LastVidPts;
+	switch (dev_type)
+	{
+		case DEV_AUDIO:
+			if (stStatusInfo.stSyncStatus.u32LastAudPts == HI_INVALID_PTS)
+				return false;
+
+			player->LastPTS = stStatusInfo.stSyncStatus.u32LastAudPts;
+		break;
+		case DEV_VIDEO:
+			if (stStatusInfo.stSyncStatus.u32LastVidPts == HI_INVALID_PTS)
+				return false;
+
+			player->LastPTS = stStatusInfo.stSyncStatus.u32LastVidPts;
+		break;
+	}
 
 	*pts = player->LastPTS * 90;
 
@@ -1134,6 +1155,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 				return size;
 			}
 
+			pthread_mutex_lock(&player->m_write);
 			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
 			{
 				char *from = malloc(data_size);
@@ -1145,10 +1167,11 @@ int player_write(int dev_type, const char *buf, size_t size)
 				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
 				{
 					player->asize = 0;
+					pthread_mutex_unlock(&player->m_write);
 					return size;
 				}
 			}
-			return size;
+			pthread_mutex_unlock(&player->m_write);
 		}
 		break;
 		case DEV_VIDEO:
@@ -1168,6 +1191,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 				return size;
 			}
 
+			pthread_mutex_lock(&player->m_write);
 			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
 			{
 				char *from = malloc(data_size);
@@ -1179,9 +1203,11 @@ int player_write(int dev_type, const char *buf, size_t size)
 				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
 				{
 					player->vsize = 0;
+					pthread_mutex_unlock(&player->m_write);
 					return size;
 				}
 			}
+			pthread_mutex_unlock(&player->m_write);
 		}
 		break;
 	}
@@ -1207,6 +1233,7 @@ struct class_ops *player_get_ops(void)
     player_ops.sync				= player_sync;
 	player_ops.channel			= player_channel;
 	player_ops.status			= player_get_status;
+	player_ops.have_event		= player_have_event;
 	player_ops.get_vsize		= player_get_vsize;
 	player_ops.get_framerate	= player_get_framerate;
 	player_ops.get_progressive	= player_get_progressive;

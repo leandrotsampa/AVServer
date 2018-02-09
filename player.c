@@ -83,7 +83,6 @@ struct class_ops player_ops;
 
 struct s_player {
 	bool IsCreated;
-	int TunerID;
 	int PlayerMode;		/* 0 demux, 1 memory */
 	int AudioPid;		/* unknown pid */
 	uint8_t AudioCounter;
@@ -730,8 +729,6 @@ bool player_set_pid(int dev_type, int pid)
 bool player_set_mode(int mode)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, mode);
-	HI_UNF_DMX_PORT_E enToPortId;
-	HI_UNF_DMX_PORT_E enFromPortId;
 	HI_UNF_AVPLAY_ATTR_S stAvplayAttr;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
@@ -743,10 +740,12 @@ bool player_set_mode(int mode)
 	else if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
 		return false;
 
-	/** Reset buffer for RAM **/
-	if (mode == 1)
+	if (mode == 1) /* MEMORY */
 	{
 		char *buf;
+		HI_UNF_DMX_PORT_E enFromPortId;
+
+		/** Reset buffers **/
 		player->AudioCounter = 0;
 		player->VideoCounter = 0;
 		player->pkt_asize = 0;
@@ -765,30 +764,28 @@ bool player_set_mode(int mode)
 			read_buf(player->b_video, buf, get_max_read_size(player->b_video));
 			free(buf);
 		}
-	}
 
-	enToPortId = (mode != 0 /* DEMUX */ ? HI_UNF_DMX_PORT_RAM_0 : (HI_UNF_DMX_PORT_TSI_0 + player->TunerID));
-	if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
-	{
-		if (enFromPortId == enToPortId)
-			return true;
-		else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
+		/** Change Port **/
+		if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
+		{
+			if (enFromPortId == HI_UNF_DMX_PORT_RAM_0)
+				return true;
+			else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
+				return false;
+		}
+
+		if (HI_UNF_DMX_AttachTSPort(stAvplayAttr.u32DemuxId, HI_UNF_DMX_PORT_RAM_0) != HI_SUCCESS)
+		{
+			printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
 			return false;
-	}
+		}
 
-	if (HI_UNF_DMX_AttachTSPort(stAvplayAttr.u32DemuxId, enToPortId) != HI_SUCCESS)
-	{
-		printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
-		return false;
-	}
-
-	if (enToPortId == HI_UNF_DMX_PORT_RAM_0)
-	{
 		if (!(player->AudioPid > 0 && player->AudioPid < 0x1FFFF))
 			player_set_pid(DEV_AUDIO, 100);
 		if (!(player->VideoPid > 0 && player->VideoPid < 0x1FFFF))
 			player_set_pid(DEV_VIDEO, 101);
 	}
+
 	/*switch (dev_type)
 	{
 		case DEV_AUDIO:

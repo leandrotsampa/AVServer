@@ -253,7 +253,7 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 			pthread_mutex_unlock(&m_video);
 		break;
 		case DVB_DVR_DEV:
-			printf("[NOTICE] %s: The DVR device it's not implemented yet.", __FUNCTION__);
+			printf("[NOTICE] %s: The DVR device it's not implemented yet. (Size %d)\n", __FUNCTION__, size);
 		break;
 	}
 
@@ -514,6 +514,7 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 			*reventsp |= (POLLOUT | POLLWRNORM);
 			pthread_mutex_unlock(&m_audio);
 		case DVB_VIDEO_DEV:
+		case DVB_DVR_DEV:
 			if (player->have_event())
 				*reventsp = POLLPRI;
 

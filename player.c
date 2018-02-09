@@ -506,6 +506,9 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME);
 
+		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
+		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
+
 		free_buf(player->b_audio);
 		free_buf(player->b_video);
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
@@ -517,9 +520,6 @@ void player_destroy(void)
 
 		HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
 		HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
-
-		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
-		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
 
 		HI_UNF_AVPLAY_Destroy(player->hPlayer);
 		HI_UNF_AVPLAY_DeInit();

@@ -111,7 +111,7 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 		case DVB_AUDIO_DEV:
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
-			stbuf->st_mode  = S_IFREG | 0644;
+			stbuf->st_mode  = S_IFREG | 0660;
 			stbuf->st_size  = 0;
 			stbuf->st_nlink = 1;
 		break;

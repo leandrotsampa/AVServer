@@ -1,5 +1,6 @@
 #include <AVServer.h>
 #include <ring_buf.h>
+#include <unistd.h>
 #include <hi_adp_mpi.h>
 #include <hi_common.h>
 #include <hi_unf_avplay.h>
@@ -1344,7 +1345,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 	}
 
 	pthread_mutex_lock(&player->m_write);
-	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
+	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 50000 /* 50ms */) == HI_SUCCESS)
 	{
 		char *from = malloc(data_size);
 
@@ -1355,12 +1356,23 @@ int player_write(int dev_type, const char *buf, size_t size)
 
 		player_pes2ts(player, sBuf.pu8Data, from, data_size);
 
-		if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS && !IsHeader)
+		if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
 		{
+			if (IsHeader)
+			{
+				write_to_buf(rbuf, (char *)buf, size);
+				*pkt_size = ((buf[4]<<8) | buf[5]) + 6;
+			}
+
 			pthread_mutex_unlock(&player->m_write);
 			return size;
 		}
+		else
+			printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
 	}
+	else
+		printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, ts_total_size);
+
 	pthread_mutex_unlock(&player->m_write);
 
 	return 0;

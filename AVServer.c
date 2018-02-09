@@ -40,8 +40,9 @@
 #include <poll.h>
 #include <AVServer.h>
 
-#define AUDIO_DEV	"audio"
-#define VIDEO_DEV	"video"
+#define AUDIO_DEV	"audio0"
+#define VIDEO_DEV	"video0"
+#define DVR_DEV		"dvr0"
 
 enum {
 	DVB_NONE,
@@ -49,6 +50,7 @@ enum {
 	DVB_FILE,
 	DVB_AUDIO_DEV,
 	DVB_VIDEO_DEV,
+	DVB_DVR_DEV,
 };
 
 static unsigned dvb_hisi_open_mask;
@@ -65,6 +67,8 @@ static int dvb_hisi_file_type(const char *path)
 		return DVB_AUDIO_DEV;
 	else if (strcmp(path, "/" VIDEO_DEV) == 0)
 		return DVB_VIDEO_DEV;
+	else if (strcmp(path, "/" DVR_DEV) == 0)
+		return DVB_DVR_DEV;
 
 	return DVB_NONE;
 }
@@ -106,6 +110,7 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 		case DVB_FILE:
 		case DVB_AUDIO_DEV:
 		case DVB_VIDEO_DEV:
+		case DVB_DVR_DEV:
 			stbuf->st_mode  = S_IFREG | 0644;
 			stbuf->st_size  = 0;
 			stbuf->st_nlink = 1;
@@ -134,6 +139,7 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 		{
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
+			case DVB_DVR_DEV:
 				if (dvb_hisi_open_mask & (1 << type))
 					return -EBUSY;
 
@@ -182,6 +188,7 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 		{
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
+			case DVB_DVR_DEV:
 				dvb_hisi_open_mask &= ~(1 << type);
 
 				if (type == DVB_AUDIO_DEV && player)
@@ -245,6 +252,9 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 			ret = player->write(DEV_VIDEO, buf, size);
 			pthread_mutex_unlock(&m_video);
 		break;
+		case DVB_DVR_DEV:
+			printf("[NOTICE] %s: The DVR device it's not implemented yet.", __FUNCTION__);
+		break;
 	}
 
 	return ret;
@@ -261,6 +271,7 @@ static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	filler(buf, "..", NULL, 0, 0);
 	filler(buf, AUDIO_DEV, NULL, 0, 0);
 	filler(buf, VIDEO_DEV, NULL, 0, 0);
+	filler(buf, DVR_DEV, NULL, 0, 0);
 
 	return 0;
 }

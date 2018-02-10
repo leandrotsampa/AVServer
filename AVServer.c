@@ -56,8 +56,7 @@ enum {
 static unsigned dvb_hisi_open_mask;
 
 /* Mutex for Player */
-static pthread_mutex_t m_audio;
-static pthread_mutex_t m_video;
+static pthread_mutex_t m_pwrite;
 
 static int dvb_hisi_file_type(const char *path)
 {
@@ -243,19 +242,19 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
-			pthread_mutex_lock(&m_audio);
+			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_AUDIO, buf, size);
-			pthread_mutex_unlock(&m_audio);
+			pthread_mutex_unlock(&m_pwrite);
 		break;
 		case DVB_VIDEO_DEV:
-			pthread_mutex_lock(&m_video);
+			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_VIDEO, buf, size);
-			pthread_mutex_unlock(&m_video);
+			pthread_mutex_unlock(&m_pwrite);
 		break;
 		case DVB_DVR_DEV:
-			pthread_mutex_lock(&m_video);
+			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_DVR, buf, size);
-			pthread_mutex_unlock(&m_video);
+			pthread_mutex_unlock(&m_pwrite);
 		break;
 	}
 
@@ -374,6 +373,8 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		break;
 		case AUDIO_CLEAR_BUFFER:
 			printf("%s: AUDIO_CLEAR_BUFFER\n", __FUNCTION__);
+
+			return player->clear(DEV_AUDIO) - 1;
 		break;
 		case AUDIO_SET_ID:
 			printf("%s: AUDIO_SET_ID\n", __FUNCTION__);
@@ -467,6 +468,8 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		break;
 		case VIDEO_CLEAR_BUFFER:
 			printf("%s: VIDEO_CLEAR_BUFFER\n", __FUNCTION__);
+
+			return player->clear(DEV_VIDEO) - 1;
 		break;
 		case VIDEO_SET_STREAMTYPE:
 			printf("%s: VIDEO_SET_STREAMTYPE\n", __FUNCTION__);
@@ -508,9 +511,9 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
-			pthread_mutex_lock(&m_audio);
+			pthread_mutex_lock(&m_pwrite);
 			*reventsp |= (POLLOUT | POLLWRNORM);
-			pthread_mutex_unlock(&m_audio);
+			pthread_mutex_unlock(&m_pwrite);
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
 			if (player->have_event())
@@ -518,9 +521,9 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 
 			if (dvb_hisi_open_mask & (1 << type))
 			{
-				pthread_mutex_lock(&m_video);
+				pthread_mutex_lock(&m_pwrite);
 				*reventsp |= (POLLOUT | POLLWRNORM);
-				pthread_mutex_unlock(&m_video);
+				pthread_mutex_unlock(&m_pwrite);
 			}
 		break;
 		default:
@@ -546,8 +549,7 @@ static struct fuse_operations dvb_hisi_oper = {
 
 int main(int argc, char *argv[])
 {
-	pthread_mutex_init(&m_audio, NULL);
-	pthread_mutex_init(&m_video, NULL);
+	pthread_mutex_init(&m_pwrite, NULL);
 
-	return fuse_main(argc, argv, &dvb_hisi_oper, "Leandro" /*NULL*/);
+	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);
 }

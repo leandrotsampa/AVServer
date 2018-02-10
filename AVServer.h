@@ -25,6 +25,7 @@ struct class_ops {
     void (*destroy)(void);
 
 	/** Call's for Player **/
+	bool (*clear)(int);
 	bool (*set_type)(int, int);
 	bool (*set_pid)(int, int);
 	bool (*set_mode)(int);

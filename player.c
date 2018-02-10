@@ -461,7 +461,7 @@ bool player_create(void)
 		goto TRACK_DESTROY;
 	}
 
-	HIADP_AVPlay_SetAdecAttr(player->hPlayer, HA_AUDIO_ID_MP3, HD_DEC_MODE_RAWPCM, 0);
+	HIADP_AVPlay_SetAdecAttr(player->hPlayer, HA_AUDIO_ID_AAC, HD_DEC_MODE_RAWPCM, 0);
 	HIADP_AVPlay_SetVdecAttr(player->hPlayer, HI_UNF_VCODEC_TYPE_MPEG2, HI_UNF_VCODEC_MODE_NORMAL);
 
 	HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr);
@@ -497,12 +497,12 @@ bool player_create(void)
 	player->PlayerMode		= 0;
 	player->AudioPid		= 0x1FFFF;
 	player->AudioPts		= HI_INVALID_PTS;
-	player->AudioType		= 1; /* MPEG */
+	player->AudioType		= HA_AUDIO_ID_AAC;
 	player->AudioChannel	= 0;
 	player->AudioState		= 0;
 	player->VideoPid		= 0x1FFFF;
 	player->VideoPts		= HI_INVALID_PTS;
-	player->VideoType		= 0; /* MPEG2 */
+	player->VideoType		= HI_UNF_VCODEC_TYPE_MPEG2;
 	player->VideoState		= 0;
 	player->VideoFormat		= 1;
 	player->DisplayFormat	= 0;
@@ -592,6 +592,35 @@ void player_destroy(void)
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
 }
 
+bool player_clear(int dev_type)
+{
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	pthread_mutex_lock(&player->m_write);
+	if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
+		printf("[ERROR] %s: Failed to reset buffer for device type %d.\n", __FUNCTION__, dev_type);
+
+	if (dev_type == DEV_AUDIO)
+	{
+		HI_UNF_AVPLAY_RESET_OPT_S stResetOpt;
+		pthread_mutex_lock(&player->m_apts);
+		stResetOpt.u32SeekPtsMs = player->AudioPts;
+		if (HI_UNF_AVPLAY_Reset(player->hPlayer, &stResetOpt) != HI_SUCCESS)
+			printf("[ERROR] %s: Failed to reset player for device type %d.\n", __FUNCTION__, dev_type);
+		pthread_mutex_unlock(&player->m_apts);
+	}
+
+	pthread_mutex_unlock(&player->m_write);
+
+	return true;
+}
+
 bool player_set_type(int dev_type, int type)
 {
 	printf("[INFO] %s(%d, %d) -> called.\n", __FUNCTION__, dev_type, type);
@@ -609,14 +638,12 @@ bool player_set_type(int dev_type, int type)
 		{
 			HA_CODEC_ID_E htype;
 
-			if (player->AudioType == type)
-				return true;
-/*			else if (player->AudioState == 1)
+			if (player->AudioState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Audio Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
+				printf("[ERROR] %s: Only can change Audio Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
-*/
+
 			switch (type)
 			{
 				case AUDIO_STREAMTYPE_AC3:
@@ -649,27 +676,27 @@ bool player_set_type(int dev_type, int type)
 				break;
 			}
 
-			if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
+			if (player->AudioType == htype)
+				return true;
+			else if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
 			{
-				printf("[ERROR] %s -> Failed to set Audio Type %d.\n", __FUNCTION__, type);
+				printf("[ERROR] %s: Failed to set Audio Type %d.\n", __FUNCTION__, type);
 				return false;
 			}
 
-			player->AudioType = type;
+			player->AudioType = htype;
 		}
 		break;
 		case DEV_VIDEO:
 		{
 			HI_UNF_VCODEC_TYPE_E htype;
 
-			if (player->VideoType == type)
-				return true;
-/*			else if (player->VideoState == 1)
+			if (player->VideoState == 1)
 			{
-				printf("[ERROR] %s -> Only can change Video Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
+				printf("[ERROR] %s: Only can change Video Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
 				return false;
 			}
-*/
+
 			switch (type)
 			{
 				case VIDEO_STREAMTYPE_MPEG2:
@@ -702,13 +729,15 @@ bool player_set_type(int dev_type, int type)
 				break;
 			}
 
-			if (HIADP_AVPlay_SetVdecAttr(player->hPlayer, htype, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
+			if (player->VideoType == htype)
+				return true;
+			else if (HIADP_AVPlay_SetVdecAttr(player->hPlayer, htype, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
 			{
-				printf("[ERROR] %s -> Failed to set Video Type %d.\n", __FUNCTION__, type);
+				printf("[ERROR] %s: Failed to set Video Type %d.\n", __FUNCTION__, type);
 				return false;
 			}
 
-			player->VideoType = type;
+			player->VideoType = htype;
 		}
 		break;
 	}
@@ -837,6 +866,12 @@ bool player_set_mode(int mode)
 			free(buf);
 		}
 
+		/** Set PIDs if necessary. **/
+		if (!(player->AudioPid > 0 && player->AudioPid < 0x1FFFF))
+			player_set_pid(DEV_AUDIO, 100);
+		if (!(player->VideoPid > 0 && player->VideoPid < 0x1FFFF))
+			player_set_pid(DEV_VIDEO, 101);
+
 		/** Change Port **/
 		if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
 		{
@@ -851,11 +886,6 @@ bool player_set_mode(int mode)
 			printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
 			return false;
 		}
-
-		if (!(player->AudioPid > 0 && player->AudioPid < 0x1FFFF))
-			player_set_pid(DEV_AUDIO, 100);
-		if (!(player->VideoPid > 0 && player->VideoPid < 0x1FFFF))
-			player_set_pid(DEV_VIDEO, 101);
 	}
 
 	player->PlayerMode = mode;
@@ -1160,7 +1190,7 @@ bool player_get_status(int dev_type, void *data)
 			status->play_state		= player->AudioState;
 			status->stream_source	= player->PlayerMode;
 			status->channel_select	= player->AudioChannel;
-			status->bypass_mode		= (player->AudioType != 1 && player->AudioType != 10);
+			status->bypass_mode		= (player->AudioType != HA_AUDIO_ID_AAC && player->AudioType != 10);
 			//status->mixer_state;
 			printf("[WARNING] %s -> Mixer state not implemented.\n", __FUNCTION__);
 		}
@@ -1313,6 +1343,7 @@ bool player_get_pts(int dev_type, long long *pts)
 		return false;
 	}
 
+	pthread_mutex_lock(&player->m_write);
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
@@ -1326,6 +1357,7 @@ bool player_get_pts(int dev_type, long long *pts)
 			pthread_mutex_unlock(&player->m_vpts);
 		break;
 	}
+	pthread_mutex_unlock(&player->m_write);
 
 	return (*pts != HI_INVALID_PTS);
 }
@@ -1455,6 +1487,7 @@ struct class_ops *player_get_ops(void)
 {
 	player_ops.create			= player_create;
 	player_ops.destroy			= player_destroy;
+	player_ops.clear			= player_clear;
 	player_ops.set_type			= player_set_type;
 	player_ops.set_pid			= player_set_pid;
 	player_ops.set_mode			= player_set_mode;

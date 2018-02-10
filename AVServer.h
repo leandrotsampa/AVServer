@@ -42,7 +42,6 @@ struct class_ops {
 	bool (*get_event)(struct video_event *);
 	bool (*get_vsize)(video_size_t *);
 	bool (*get_framerate)(int *);
-	bool (*get_progressive)(int *);
 	bool (*get_pts)(int, long long *);
 
 	/** Other's operations **/

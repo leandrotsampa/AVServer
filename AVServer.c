@@ -368,7 +368,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case AUDIO_GET_CAPABILITIES:
 			printf("%s: AUDIO_GET_CAPABILITIES\n", __FUNCTION__);
 
-			*(unsigned int *)arg = AUDIO_CAP_LPCM | AUDIO_CAP_DTS | AUDIO_CAP_AC3 | AUDIO_CAP_MP1 | AUDIO_CAP_MP2;
+			*(unsigned int *)data = AUDIO_CAP_LPCM | AUDIO_CAP_DTS | AUDIO_CAP_AC3 | AUDIO_CAP_MP1 | AUDIO_CAP_MP2;
 		break;
 		case AUDIO_CLEAR_BUFFER:
 			printf("%s: AUDIO_CLEAR_BUFFER\n", __FUNCTION__);
@@ -384,9 +384,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 			printf("%s: AUDIO_SET_STREAMTYPE\n", __FUNCTION__);
 		break;
 		case AUDIO_GET_PTS:
-			printf("%s: AUDIO_GET_PTS\n", __FUNCTION__);
-
-			return player->get_pts(DEV_AUDIO, (long long *)arg) - 1;
+			return player->get_pts(DEV_AUDIO, (long long *)data) - 1;
 		break;
 
 
@@ -439,7 +437,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case VIDEO_GET_SIZE:
 			printf("%s: VIDEO_GET_SIZE\n", __FUNCTION__);
 
-			return player->get_vsize((video_size_t *)arg) - 1;
+			return player->get_vsize((video_size_t *)data) - 1;
 		break;
 		case VIDEO_SET_DISPLAY_FORMAT:
 			printf("%s: VIDEO_SET_DISPLAY_FORMAT\n", __FUNCTION__);
@@ -463,7 +461,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case VIDEO_GET_CAPABILITIES:
 			printf("%s: VIDEO_GET_CAPABILITIES\n", __FUNCTION__);
 
-			*(int *)arg = VIDEO_CAP_MPEG1 | VIDEO_CAP_MPEG2 | VIDEO_CAP_SYS | VIDEO_CAP_PROG;
+			*(unsigned int *)data = VIDEO_CAP_MPEG1 | VIDEO_CAP_MPEG2 | VIDEO_CAP_SYS | VIDEO_CAP_PROG;
 		break;
 		case VIDEO_CLEAR_BUFFER:
 			printf("%s: VIDEO_CLEAR_BUFFER\n", __FUNCTION__);
@@ -476,12 +474,10 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case VIDEO_GET_FRAME_RATE:
 			printf("%s: VIDEO_GET_FRAME_RATE\n", __FUNCTION__);
 
-			return player->get_framerate((int *)arg) - 1;
+			return player->get_framerate((int *)data) - 1;
 		break;
 		case VIDEO_GET_PTS:
-			printf("%s: VIDEO_GET_PTS\n", __FUNCTION__);
-
-			return player->get_pts(DEV_VIDEO, (long long *)arg) - 1;
+			return player->get_pts(DEV_VIDEO, (long long *)data) - 1;
 		break;
 		default:
 			printf("[INFO] %s: UNKNOWN %u\n", __FUNCTION__, cmd);

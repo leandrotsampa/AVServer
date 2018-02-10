@@ -253,7 +253,9 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 			pthread_mutex_unlock(&m_video);
 		break;
 		case DVB_DVR_DEV:
-			printf("[NOTICE] %s: The DVR device it's not implemented yet. (Size %d)\n", __FUNCTION__, size);
+			pthread_mutex_lock(&m_video);
+			ret = player->write(DEV_DVR, buf, size);
+			pthread_mutex_unlock(&m_video);
 		break;
 	}
 

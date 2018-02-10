@@ -1364,6 +1364,29 @@ int player_write(int dev_type, const char *buf, size_t size)
 			rbuf = player->b_video;
 			pkt_size = &player->pkt_vsize;
 		break;
+		case DEV_DVR:
+			if (player->PlayerMode != 1)
+				player_set_mode(1);
+
+			pthread_mutex_lock(&player->m_write);
+			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, size, &sBuf, 50000 /* 50ms */) == HI_SUCCESS)
+			{
+				memcpy(sBuf.pu8Data, buf, size);
+
+				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, size) == HI_SUCCESS)
+				{
+					pthread_mutex_unlock(&player->m_write);
+					return size;
+				}
+				else
+					printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
+			}
+			else
+				printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, size);
+			pthread_mutex_unlock(&player->m_write);
+
+			return 0;
+		break;
 		default:
 			return size;
 		break;
@@ -1423,7 +1446,6 @@ int player_write(int dev_type, const char *buf, size_t size)
 	}
 	else
 		printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, ts_total_size);
-
 	pthread_mutex_unlock(&player->m_write);
 
 	return 0;

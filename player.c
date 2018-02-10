@@ -110,7 +110,7 @@ struct s_player {
 		int width;
 		int heigth;
 		int aspect;
-		int framerate;
+		unsigned int framerate;
 		bool progressive;
 	} events[3];
 
@@ -1150,7 +1150,7 @@ bool player_get_status(int dev_type, void *data)
 	{
 		case DEV_AUDIO:
 		{
-			struct audio_status *status = (struct audio_status *)data;
+			audio_status_t *status = (audio_status_t *)data;
 
 			if (!status)
 				return false;
@@ -1282,7 +1282,7 @@ bool player_get_vsize(video_size_t *vsize)
 	return false;
 }
 
-bool player_get_framerate(int *framerate)
+bool player_get_framerate(unsigned int *framerate)
 {
 	printf("[INFO] %s() -> called.\n", __FUNCTION__);
 	struct s_player *player = (struct s_player *)player_ops.priv;

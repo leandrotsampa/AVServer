@@ -363,7 +363,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case AUDIO_GET_STATUS:
 			printf("%s: AUDIO_GET_STATUS\n", __FUNCTION__);
 
-			return player->status(DEV_AUDIO, (struct audio_status *)data) - 1;
+			return player->status(DEV_AUDIO, (audio_status_t *)data) - 1;
 		break;
 		case AUDIO_GET_CAPABILITIES:
 			printf("%s: AUDIO_GET_CAPABILITIES\n", __FUNCTION__);
@@ -474,7 +474,7 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		case VIDEO_GET_FRAME_RATE:
 			printf("%s: VIDEO_GET_FRAME_RATE\n", __FUNCTION__);
 
-			return player->get_framerate((int *)data) - 1;
+			return player->get_framerate((unsigned int *)data) - 1;
 		break;
 		case VIDEO_GET_PTS:
 			return player->get_pts(DEV_VIDEO, (long long *)data) - 1;

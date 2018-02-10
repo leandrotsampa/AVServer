@@ -239,24 +239,20 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	if (!player)
 		return -EINVAL;
 
+	pthread_mutex_lock(&m_pwrite);
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
-			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_AUDIO, buf, size);
-			pthread_mutex_unlock(&m_pwrite);
 		break;
 		case DVB_VIDEO_DEV:
-			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_VIDEO, buf, size);
-			pthread_mutex_unlock(&m_pwrite);
 		break;
 		case DVB_DVR_DEV:
-			pthread_mutex_lock(&m_pwrite);
 			ret = player->write(DEV_DVR, buf, size);
-			pthread_mutex_unlock(&m_pwrite);
 		break;
 	}
+	pthread_mutex_unlock(&m_pwrite);
 
 	return ret;
 }
@@ -511,20 +507,14 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
-			pthread_mutex_lock(&m_pwrite);
 			*reventsp |= (POLLOUT | POLLWRNORM);
-			pthread_mutex_unlock(&m_pwrite);
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
 			if (player->have_event())
 				*reventsp = POLLPRI;
 
 			if (dvb_hisi_open_mask & (1 << type))
-			{
-				pthread_mutex_lock(&m_pwrite);
 				*reventsp |= (POLLOUT | POLLWRNORM);
-				pthread_mutex_unlock(&m_pwrite);
-			}
 		break;
 		default:
 			*reventsp = -EINVAL;

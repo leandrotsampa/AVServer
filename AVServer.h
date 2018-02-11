@@ -32,6 +32,7 @@ struct class_ops {
 	bool (*set_blank)(bool);
 	bool (*set_format)(int);
 	bool (*set_disp_format)(int);
+	bool (*set_fastfoward)(int);
     bool (*play)(int);
 	bool (*pause)(int);
 	bool (*resume)(int);

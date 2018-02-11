@@ -10,6 +10,11 @@
 #include <hi_unf_keyled.h>
 #include <hi_unf_sound.h>
 #include <hi_unf_vo.h>
+#include <hi_mpi_ao.h>
+#include <hi_mpi_avplay.h>
+#include <hi_mpi_sync.h>
+#include <hi_mpi_vdec.h>
+#include <hi_mpi_win.h>
 #include <hi_video_codec.h>
 
 /* Audio Includes */
@@ -130,6 +135,8 @@ struct s_player {
 	unsigned int hWindow;
 	unsigned int hTrack;
 	unsigned int hTsBuffer;
+	unsigned int hVdec;
+	unsigned int hSync;
 };
 
 void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
@@ -480,6 +487,10 @@ bool player_create(void)
 		printf("[WARNING] %s -> Failed to register video event callback.\n", __FUNCTION__);
 
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
+
+	if (HI_MPI_AVPLAY_GetSyncVdecHandle(player->hPlayer, &player->hVdec, &player->hSync) != HI_SUCCESS)
+		printf("[ERROR] %s: Failed to get Vdec and Sync handler from player.\n", __FUNCTION__);
+
 	player->events[0].type = VIDEO_EVENT_SIZE_CHANGED;
 	player->events[1].type = VIDEO_EVENT_FRAME_RATE_CHANGED;
 	player->events[2].type = 16; /* VIDEO_EVENT_PROGRESSIVE_CHANGED */
@@ -615,7 +626,6 @@ bool player_clear(int dev_type)
 			printf("[ERROR] %s: Failed to reset player for device type %d.\n", __FUNCTION__, dev_type);
 		pthread_mutex_unlock(&player->m_apts);
 	}
-
 	pthread_mutex_unlock(&player->m_write);
 
 	return true;
@@ -997,16 +1007,31 @@ bool player_pause(int dev_type)
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
 		return false;
 	}
+	else if (!player->hSync)
+		printf("[ERROR] %s: Sync handler it's not setted.\n", __FUNCTION__);
 
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+		{
 			if (player->AudioState == 2)
 				return true;
 			else if (player->AudioState == 0)
 				return false;
 
+			pthread_mutex_lock(&player->m_write);
+			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to stop sync Audio.\n", __FUNCTION__);
+			if (HI_MPI_AO_Track_Pause(player->hTrack) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to pause Audio.\n", __FUNCTION__);
+				pthread_mutex_unlock(&player->m_write);
+				return false;
+			}
+
 			player->AudioState = 2;
+			pthread_mutex_unlock(&player->m_write);
+		}
 		break;
 		case DEV_VIDEO:
 			if (player->VideoState == 2)
@@ -1014,7 +1039,20 @@ bool player_pause(int dev_type)
 			else if (player->VideoState == 0)
 				return false;
 
+			pthread_mutex_lock(&player->m_write);
+			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to stop sync Video.\n", __FUNCTION__);
+			if (HI_MPI_WIN_Pause(player->hWindow, HI_TRUE) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to pause Video.\n", __FUNCTION__);
+				pthread_mutex_unlock(&player->m_write);
+				return false;
+			}
+			if (HI_MPI_WIN_Freeze(player->hWindow, HI_TRUE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to freeze Video.\n", __FUNCTION__);
+
 			player->VideoState = 2;
+			pthread_mutex_unlock(&player->m_write);
 		break;
 	}
 
@@ -1031,16 +1069,31 @@ bool player_resume(int dev_type)
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
 		return false;
 	}
+	else if (!player->hSync)
+		printf("[ERROR] %s: Sync handler it's not setted.\n", __FUNCTION__);
 
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+		{
 			if (player->AudioState == 1)
 				return true;
 			else if (player->AudioState == 0)
 				return false;
 
+			pthread_mutex_lock(&player->m_write);
+			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to start sync Audio.\n", __FUNCTION__);
+			if (HI_MPI_AO_Track_Resume(player->hTrack) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to resume Audio.\n", __FUNCTION__);
+				pthread_mutex_unlock(&player->m_write);
+				return false;
+			}
+
 			player->AudioState = 1;
+			pthread_mutex_unlock(&player->m_write);
+		}
 		break;
 		case DEV_VIDEO:
 			if (player->VideoState == 1)
@@ -1048,10 +1101,20 @@ bool player_resume(int dev_type)
 			else if (player->VideoState == 0)
 				return false;
 
+			pthread_mutex_lock(&player->m_write);
+			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to start sync Video.\n", __FUNCTION__);
+			if (HI_MPI_WIN_Freeze(player->hWindow, HI_FALSE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to unfreeze Video.\n", __FUNCTION__);
+			if (HI_MPI_WIN_Pause(player->hWindow, HI_FALSE) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to resume Video.\n", __FUNCTION__);
+				pthread_mutex_unlock(&player->m_write);
+				return false;
+			}
+
 			player->VideoState = 1;
-		break;
-		default:
-			return false;
+			pthread_mutex_unlock(&player->m_write);
 		break;
 	}
 
@@ -1451,7 +1514,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 	}
 
 	pthread_mutex_lock(&player->m_write);
-	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 50000 /* 50ms */) == HI_SUCCESS)
+	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 10000 /* 10ms */) == HI_SUCCESS)
 	{
 		char *from = malloc(data_size);
 

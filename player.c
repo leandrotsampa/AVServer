@@ -139,6 +139,36 @@ struct s_player {
 	unsigned int hSync;
 };
 
+void player_showtime(void)
+{
+	HI_UNF_KEYLED_TIME_S stTime;
+	time_t _tm = time(NULL);
+	struct tm *curtime = localtime(&_tm);
+
+	stTime.u32Hour = curtime->tm_hour;
+	stTime.u32Minute = curtime->tm_min;
+
+	if (HI_UNF_LED_DisplayTime(stTime) != HI_SUCCESS)
+		printf("[ERROR] %s: Time not writed to keyled.\n", __FUNCTION__);
+}
+
+void player_create_painel(void)
+{
+	if (HI_UNF_KEYLED_Init() != HI_SUCCESS)
+	{
+		printf("[ERROR] %s: Failed to create painel.\n", __FUNCTION__);
+		return;
+	}
+
+	int ret = HI_UNF_KEYLED_SelectType(HI_UNF_KEYLED_TYPE_FD650);
+	ret |= HI_UNF_LED_Open();
+	ret |= HI_UNF_LED_SetFlashFreq(HI_UNF_KEYLED_LEVEL_1);
+	ret |= HI_UNF_LED_SetFlashPin(HI_UNF_KEYLED_LIGHT_ALL);
+
+	if (ret == HI_SUCCESS)
+		player_showtime();
+}
+
 void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
 {
 	int i;
@@ -522,6 +552,7 @@ bool player_create(void)
 	player->IsMute			= false;
 
 	player_ops.priv = player;
+	player_create_painel();
 	return true;
 
 SND_DETACH:
@@ -565,6 +596,9 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_STOP_OPT_S stStop;
 		stStop.u32TimeoutMs = 0;
 		stStop.enMode = HI_UNF_AVPLAY_STOP_MODE_BLACK;
+
+		player_showtime();
+		HI_UNF_KEYLED_DeInit();
 
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL);
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
@@ -1541,6 +1575,49 @@ int player_write(int dev_type, const char *buf, size_t size)
 			pthread_mutex_unlock(&player->m_write);
 
 			return 0;
+		break;
+		case DEV_PAINEL:
+		{
+			if (strncmp(buf, "TIME", 4) == HI_SUCCESS)
+				player_showtime();
+			else
+			{
+				HI_U8 DigDisCode[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+				HI_U8 UCharDisCode[] = {
+					0xFF, 0xFF, 0x39, 0xFF, 0x79,
+					0x71, 0xFF, 0x76, 0xFF, 0xFF,
+					0xFF, 0x38, 0x95, 0xFF, 0x3f,
+					0x73, 0xFF, 0x77,/*R*/ 0x6d, 0xFF,
+					0x3e, 0xFF, 0xFF, 0xFF, 0xFF,
+					0xFF
+				};
+				//Uppercase letters can only be displayed 'C'、'E'、'F'、'H'、'L'、'O'、'P'、'S'、'U'，From left to right respectively correspond to this array 0xFF value.
+				HI_U8 LCharDisCode[] = {
+					0xFF, 0x7c, 0x58, 0x5e, 0x79,
+					0xFF, 0x6f, 0x74, 0x30, 0xFF,
+					0xFF, 0x38, 0xFF, 0x54, 0x5c,
+					0x73, 0x67, 0xFF, 0x6d, 0x78,
+					0x1c, 0xFF, 0xFF, 0xFF, 0xFF,
+					0xFF
+				};
+
+				int i, value = 0;
+				for (i = 0; i < 4; i++)
+				{
+					if (buf[i] >= '0' && buf[i] <= '9')
+						value |= DigDisCode[buf[i] - 48] << (8 * i);
+					else if (buf[i] >= 'A' && buf[i] <= 'Z')
+						value |= UCharDisCode[buf[i] - 65] << (8 * i);
+					else
+						value |= LCharDisCode[buf[i] - 97] << (8 * i);
+				}
+
+				if (HI_UNF_LED_Display(value) != HI_SUCCESS)
+					printf("[ERROR] %s: The value(%s) not writed to keyled.\n", __FUNCTION__, buf);
+			}
+
+			return size;
+		}
 		break;
 		default:
 			return size;

@@ -17,6 +17,7 @@ enum {
 	DEV_AUDIO,
 	DEV_VIDEO,
 	DEV_DVR,
+	DEV_PAINEL,
 };
 
 /* Class Operations */

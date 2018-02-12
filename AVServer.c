@@ -43,6 +43,7 @@
 #define AUDIO_DEV	"audio0"
 #define VIDEO_DEV	"video0"
 #define DVR_DEV		"dvr0"
+#define PAINEL_DEV	"panel"
 
 enum {
 	DVB_NONE,
@@ -51,6 +52,7 @@ enum {
 	DVB_AUDIO_DEV,
 	DVB_VIDEO_DEV,
 	DVB_DVR_DEV,
+	DVB_PAINEL_DEV,
 };
 
 static unsigned dvb_hisi_open_mask;
@@ -68,6 +70,8 @@ static int dvb_hisi_file_type(const char *path)
 		return DVB_VIDEO_DEV;
 	else if (strcmp(path, "/" DVR_DEV) == 0)
 		return DVB_DVR_DEV;
+	else if (strcmp(path, "/" PAINEL_DEV) == 0)
+		return DVB_PAINEL_DEV;
 
 	return DVB_NONE;
 }
@@ -94,8 +98,6 @@ static void dvb_hisi_destroy(void *private_data)
 
 static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)
 {
-	printf("%s -> Called.\n", __FUNCTION__);
-
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
 	stbuf->st_atime = stbuf->st_mtime = time(NULL);
@@ -110,6 +112,7 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 		case DVB_AUDIO_DEV:
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
+		case DVB_PAINEL_DEV:
 			stbuf->st_mode  = S_IFREG | 0660;
 			stbuf->st_size  = 0;
 			stbuf->st_nlink = 1;
@@ -139,6 +142,7 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
 			case DVB_DVR_DEV:
+			case DVB_PAINEL_DEV:
 				if (dvb_hisi_open_mask & (1 << type))
 					return -EBUSY;
 
@@ -188,6 +192,7 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
 			case DVB_DVR_DEV:
+			case DVB_PAINEL_DEV:
 				dvb_hisi_open_mask &= ~(1 << type);
 
 				if (type == DVB_AUDIO_DEV && player)
@@ -238,6 +243,8 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 
 	if (!player)
 		return -EINVAL;
+	else if (type == DVB_PAINEL_DEV)
+		return player->write(DEV_PAINEL, buf, size);
 
 	pthread_mutex_lock(&m_pwrite);
 	switch (type)
@@ -269,6 +276,7 @@ static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	filler(buf, AUDIO_DEV, NULL, 0, 0);
 	filler(buf, VIDEO_DEV, NULL, 0, 0);
 	filler(buf, DVR_DEV, NULL, 0, 0);
+	filler(buf, PAINEL_DEV, NULL, 0, 0);
 
 	return 0;
 }

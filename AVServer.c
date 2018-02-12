@@ -549,6 +549,21 @@ static struct fuse_operations dvb_hisi_oper = {
 
 int main(int argc, char *argv[])
 {
+	printf("_____________________________________\n");
+	printf("#   _   _   _   _   _   _   _   _   #\n");
+	printf("#  / \\ / \\ / \\ / \\ / \\ / \\ / \\ / \\  #\n");
+	printf("# ( A | V | S | e | r | v | e | r ) #\n");
+	printf("#  \\_/ \\_/ \\_/ \\_/ \\_/ \\_/ \\_/ \\_/  #\n");
+	printf("#                                   #\n");
+	printf("# Created by:                       #\n");
+	printf("# 	leandrotsampa               #\n");
+	printf("# Contact:                          #\n");
+	printf("# 	leandrotsampa@yahoo.com.br  #\n");
+	printf("# Current Version:                  #\n");
+	printf("# 	1.5                         #\n");
+	printf("\e[4m#___________________________________#\e[24m\n");
+	printf("%s\n", (char[]){ 0xF0, 0x9F, 0x98, 0x8B, 0 });
+
 	pthread_mutex_init(&m_pwrite, NULL);
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);

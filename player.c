@@ -1650,36 +1650,46 @@ int player_write(int dev_type, const char *buf, size_t size)
 		return size;
 	}
 
-	pthread_mutex_lock(&player->m_write);
-	if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 10000 /* 10ms */) == HI_SUCCESS)
+	time_t seconds = 10;
+	time_t start = time(NULL);
+	time_t endwait = start + seconds;
+
+	while (start < endwait)
 	{
-		char *from = malloc(data_size);
-
-		if (!read_buf(rbuf, from, IsHeader ? data_size : data_size - size))
-			printf("[ERROR] %s: Failed to read buffer for device type %d.\n", __FUNCTION__, dev_type);
-		if (!IsHeader)
-			memcpy(&from[data_size - size], buf, size);
-
-		player_pes2ts(player, sBuf.pu8Data, from, data_size);
-
-		if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
+		pthread_mutex_lock(&player->m_write);
+		if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000 /* 1s */) == HI_SUCCESS)
 		{
-			if (IsHeader)
+			int ret = 0;
+			char *from = malloc(data_size);
+
+			if (!read_buf(rbuf, from, IsHeader ? data_size : data_size - size))
+				printf("[ERROR] %s: Failed to read buffer for device type %d.\n", __FUNCTION__, dev_type);
+			if (!IsHeader)
+				memcpy(&from[data_size - size], buf, size);
+
+			player_pes2ts(player, sBuf.pu8Data, from, data_size);
+
+			if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
 			{
-				write_to_buf(rbuf, (char *)buf, size);
-				*pkt_size = ((buf[4]<<8) | buf[5]) + 6;
+				ret = size;
+
+				if (IsHeader)
+				{
+					write_to_buf(rbuf, (char *)buf, size);
+					*pkt_size = ((buf[4]<<8) | buf[5]) + 6;
+				}
 			}
+			else
+				printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
 
 			pthread_mutex_unlock(&player->m_write);
-			return size;
+			return ret;
 		}
-		else
-			printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
-	}
-	else
-		printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, ts_total_size);
-	pthread_mutex_unlock(&player->m_write);
+		pthread_mutex_unlock(&player->m_write);
+		start = time(NULL);
+	};
 
+	printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, ts_total_size);
 	return 0;
 }
 

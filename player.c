@@ -686,15 +686,34 @@ bool player_set_type(int dev_type, int type)
 				break;
 			}
 
-			if (player->AudioType == htype)
-				return true;
-			else if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
+			if (player->AudioType != htype)
 			{
-				printf("[ERROR] %s: Failed to set Audio Type %d.\n", __FUNCTION__, type);
-				return false;
+				if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
+				{
+					printf("[ERROR] %s: Failed to set Audio Type %d.\n", __FUNCTION__, type);
+					return false;
+				}
+
+				player->AudioType = htype;
 			}
 
-			player->AudioType = htype;
+			/* Check HDMI OutPut Mode for Re-Apply this. */
+			char s_mode[12];
+			HI_UNF_SND_HDMI_MODE_E h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
+			FILE *file = fopen("/proc/stb/audio/ac3","r");
+
+			if (file)
+			{
+				fgets(s_mode, 12, file);
+				fclose(file);
+
+				if (strcmp(s_mode, "downmix") == 0)
+					h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
+				else if (strcmp(s_mode, "passthrough") == 0)
+					h_mode = HI_UNF_SND_HDMI_MODE_RAW;
+			}
+			if (HI_UNF_SND_SetHdmiMode(HI_UNF_SND_0, HI_UNF_SND_OUTPUTPORT_HDMI0, h_mode) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to set HDMI OutPut Mode.\n", __FUNCTION__);
 		}
 		break;
 		case DEV_VIDEO:

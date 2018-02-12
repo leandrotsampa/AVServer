@@ -130,8 +130,6 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 	//struct fuse_context *cxt = fuse_get_context();
 	//struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	printf("%s -> type is %d.\n", __FUNCTION__, type);
-
 	if (type == DVB_NONE)
 		return -ENOENT;
 	if ((fi->flags & O_ACCMODE) != O_RDONLY)
@@ -181,8 +179,6 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
-
-	printf("%s -> type is %d.\n", __FUNCTION__, type);
 
 	if ((fi->flags & O_ACCMODE) != O_RDONLY)
 	{
@@ -561,8 +557,7 @@ int main(int argc, char *argv[])
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
 	printf("# 	1.5                         #\n");
-	printf("\e[4m#___________________________________#\e[24m\n");
-	printf("%s\n", (char[]){ 0xF0, 0x9F, 0x98, 0x8B, 0 });
+	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	pthread_mutex_init(&m_pwrite, NULL);
 

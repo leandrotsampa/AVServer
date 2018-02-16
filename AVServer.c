@@ -26,18 +26,11 @@
  * \include AVServer.c
  */
 
-#define FUSE_USE_VERSION 30
-
-#include <config.h>
-
-#include <fuse.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-#include <errno.h>
-#include <poll.h>
 #include <AVServer.h>
 
 #define AUDIO_DEV	"audio0"
@@ -513,14 +506,10 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
-			*reventsp |= (POLLOUT | POLLWRNORM);
+			return player->poll(DEV_AUDIO, ph, reventsp, false);
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
-			if (player->have_event())
-				*reventsp = POLLPRI;
-
-			if (dvb_hisi_open_mask & (1 << type))
-				*reventsp |= (POLLOUT | POLLWRNORM);
+			return player->poll(DEV_VIDEO, ph, reventsp, dvb_hisi_open_mask & (1 << type));
 		break;
 		default:
 			*reventsp = -EINVAL;

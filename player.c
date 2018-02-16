@@ -103,9 +103,15 @@ struct s_player {
 	int VideoFormat;	/* 0 4:3, 1 16:9, 2 2.21:1 */
 	int DisplayFormat;	/* 0 Pan&Scan, 1 Letterbox, 2 Center Cut Out */
 
+	bool IsPES;
 	bool IsBlank;
 	bool IsSyncEnabled;
 	bool IsMute;
+
+	int AudioBufferState;
+	int VideoBufferState;
+	unsigned poll_status;
+	struct fuse_pollhandle *poll_handle[2];
 
 	unsigned event_status;
 	struct {
@@ -122,6 +128,7 @@ struct s_player {
 	pthread_mutex_t m_apts;
 	pthread_mutex_t m_vpts;
 	pthread_mutex_t m_event;
+	pthread_mutex_t m_poll;
 	pthread_mutex_t m_write;
 
 	ring_buffer *b_audio;
@@ -293,6 +300,8 @@ void player_pes2ts(struct s_player *p, HI_U8 *to_data, char *from_data, int size
 
 int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOID *para)
 {
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
 	if (enEvent == HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME)
 	{
 		int width;
@@ -300,7 +309,6 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 		int aspect;
 		int framerate;
 		bool progressive;
-		struct s_player *player = (struct s_player *)player_ops.priv;
 		HI_UNF_VIDEO_FRAME_INFO_S *vFrame = (HI_UNF_VIDEO_FRAME_INFO_S *)para;
 
 		/** VIDEO_EVENT_SIZE_CHANGED **/
@@ -332,8 +340,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 				player->events[0].heigth = heigth;
 				player->events[0].aspect = player->VideoFormat = aspect;
 
-				if (!(player->event_status & (1 << player->events[0].type)))
-					player->event_status |= (1 << player->events[0].type);
+				player->event_status |= (1 << player->events[0].type);
 				pthread_mutex_unlock(&player->m_event);
 			}
 
@@ -345,8 +352,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 				player->events[1].active = true;
 				player->events[1].framerate = framerate;
 
-				if (!(player->event_status & (1 << player->events[1].type)))
-					player->event_status |= (1 << player->events[1].type);
+				player->event_status |= (1 << player->events[1].type);
 				pthread_mutex_unlock(&player->m_event);
 			}
 
@@ -358,8 +364,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 				player->events[2].active = true;
 				player->events[2].progressive = progressive;
 
-				if (!(player->event_status & (1 << player->events[2].type)))
-					player->event_status |= (1 << player->events[2].type);
+				player->event_status |= (1 << player->events[2].type);
 				pthread_mutex_unlock(&player->m_event);
 			}
 
@@ -370,13 +375,68 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 	}
 	else if (enEvent == HI_UNF_AVPLAY_EVENT_NEW_AUD_FRAME)
 	{
-		struct s_player *player = (struct s_player *)player_ops.priv;
 		HI_UNF_AO_FRAMEINFO_S *aFrame = (HI_UNF_AO_FRAMEINFO_S *)para;
 
 		/** Set PTS **/
 		pthread_mutex_lock(&player->m_apts);
 		player->AudioPts = aFrame->u32PtsMs * 90;
 		pthread_mutex_unlock(&player->m_apts);
+	}
+	else if (player->IsPES)
+	{
+		pthread_mutex_lock(&player->m_poll);
+		switch (enEvent)
+		{
+			case HI_UNF_AVPLAY_EVENT_AUD_BUF_STATE:
+				switch ((HI_UNF_AVPLAY_BUF_STATE_E)para)
+				{
+					case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
+					case HI_UNF_AVPLAY_BUF_STATE_LOW:
+					case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
+					case HI_UNF_AVPLAY_BUF_STATE_HIGH:
+						if (player->poll_status & (1 << DEV_AUDIO))
+						{
+							struct fuse_pollhandle *ph = player->poll_handle[DEV_AUDIO];
+							printf("[INFO] %s: Notify poll type Audio Poll status %d.\n", __FUNCTION__, (HI_UNF_AVPLAY_BUF_STATE_E)para);
+							fuse_notify_poll(ph);
+							fuse_pollhandle_destroy(ph);
+							player->poll_handle[DEV_AUDIO] = NULL;
+							player->poll_status &= ~(1 << DEV_AUDIO);
+						}
+					break;
+					default:
+					break;
+				}
+
+				player->AudioBufferState = (HI_UNF_AVPLAY_BUF_STATE_E)para;
+			break;
+			case HI_UNF_AVPLAY_EVENT_VID_BUF_STATE:
+				switch ((HI_UNF_AVPLAY_BUF_STATE_E)para)
+				{
+					case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
+					case HI_UNF_AVPLAY_BUF_STATE_LOW:
+					case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
+					//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
+						if (player->poll_status & (1 << DEV_VIDEO))
+						{
+							struct fuse_pollhandle *ph = player->poll_handle[DEV_VIDEO];
+							printf("[INFO] %s: Notify poll type Video Poll status %d.\n", __FUNCTION__, (HI_UNF_AVPLAY_BUF_STATE_E)para);
+							fuse_notify_poll(ph);
+							fuse_pollhandle_destroy(ph);
+							player->poll_handle[DEV_VIDEO] = NULL;
+							player->poll_status &= ~(1 << DEV_VIDEO);
+						}
+					break;
+					default:
+					break;
+				}
+
+				player->VideoBufferState = (HI_UNF_AVPLAY_BUF_STATE_E)para;
+			break;
+			default:
+			break;
+		}
+		pthread_mutex_unlock(&player->m_poll);
 	}
 
     return HI_SUCCESS;
@@ -447,6 +507,8 @@ bool player_create(void)
 
 	HI_UNF_AVPLAY_GetDefaultConfig(&stAvplayAttr, HI_UNF_AVPLAY_STREAM_TYPE_TS);
 	stAvplayAttr.u32DemuxId = PLAYER_DEMUX_PORT;
+	stAvplayAttr.stStreamAttr.u32AudBufSize = 4 * 1024 * 1024; // Allocate 4MB
+	stAvplayAttr.stStreamAttr.u32VidBufSize = 9 * 1024 * 1024; // Allocate 9MB
 	if (HI_UNF_AVPLAY_Create(&stAvplayAttr, &player->hPlayer) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_AVPLAY_Create failed.\n", __FUNCTION__);
@@ -515,6 +577,10 @@ bool player_create(void)
 		printf("[WARNING] %s -> Failed to register audio event callback.\n", __FUNCTION__);
 	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
 		printf("[WARNING] %s -> Failed to register video event callback.\n", __FUNCTION__);
+	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_AUD_BUF_STATE, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
+		printf("[WARNING] %s -> Failed to register audio buffer event callback.\n", __FUNCTION__);
+	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_VID_BUF_STATE, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
+		printf("[WARNING] %s -> Failed to register video buffer event callback.\n", __FUNCTION__);
 
 	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
 
@@ -528,6 +594,7 @@ bool player_create(void)
 	pthread_mutex_init(&player->m_apts, NULL);
 	pthread_mutex_init(&player->m_vpts, NULL);
 	pthread_mutex_init(&player->m_event, NULL);
+	pthread_mutex_init(&player->m_poll, NULL);
 	pthread_mutex_init(&player->m_write, NULL);
 
 	/* Create buffer for use by Player in RAM mode. */
@@ -550,6 +617,8 @@ bool player_create(void)
 	player->IsBlank			= true;
 	player->IsSyncEnabled	= true;
 	player->IsMute			= false;
+	player->AudioBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
+	player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
 
 	player_ops.priv = player;
 	player_create_painel();
@@ -604,6 +673,8 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_AUD_FRAME);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME);
+		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_AUD_BUF_STATE);
+		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_VID_BUF_STATE);
 
 		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
 		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
@@ -904,6 +975,11 @@ bool player_set_mode(int mode)
 	player->VideoPts = HI_INVALID_PTS;
 	pthread_mutex_unlock(&player->m_vpts);
 
+	pthread_mutex_lock(&player->m_poll);
+	player->AudioBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
+	player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
+	pthread_mutex_unlock(&player->m_poll);
+
 	if (mode == 1) /* MEMORY */
 	{
 		char *buf;
@@ -940,6 +1016,7 @@ bool player_set_mode(int mode)
 		{
 			if (enFromPortId == HI_UNF_DMX_PORT_RAM_0)
 				return true;
+
 			else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
 				return false;
 		}
@@ -949,7 +1026,11 @@ bool player_set_mode(int mode)
 			printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
 			return false;
 		}
+
+		player->IsPES = true;
 	}
+	else
+		player->IsPES = false;
 
 	player->PlayerMode = mode;
 
@@ -1376,24 +1457,6 @@ bool player_get_status(int dev_type, void *data)
 	return true;
 }
 
-bool player_have_event(void)
-{
-	bool IsHaveEvent = false;
-	struct s_player *player = (struct s_player *)player_ops.priv;
-
-	if (!(player && player->IsCreated))
-	{
-		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
-		return false;
-	}
-
-	pthread_mutex_lock(&player->m_event);
-	IsHaveEvent = (player->event_status != 0);
-	pthread_mutex_unlock(&player->m_event);
-
-	return IsHaveEvent;
-}
-
 bool player_get_event(struct video_event *event)
 {
 	printf("[INFO] %s() -> called.\n", __FUNCTION__);
@@ -1517,6 +1580,73 @@ bool player_get_pts(int dev_type, long long *pts)
 	pthread_mutex_unlock(&player->m_write);
 
 	return (*pts != HI_INVALID_PTS);
+}
+
+int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bool condition)
+{
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return 0;
+	}
+
+	pthread_mutex_lock(&player->m_poll);
+	if (ph)
+	{
+		struct fuse_pollhandle *oldph = player->poll_handle[dev_type];
+
+		if (oldph)
+			fuse_pollhandle_destroy(oldph);
+
+		player->poll_status |= (1 << dev_type);
+		player->poll_handle[dev_type] = ph;
+	}
+
+	switch (dev_type)
+	{
+		case DEV_AUDIO:
+			switch (player->AudioBufferState)
+			{
+				case HI_UNF_AVPLAY_BUF_STATE_BUTT:
+				case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
+				case HI_UNF_AVPLAY_BUF_STATE_LOW:
+				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
+				case HI_UNF_AVPLAY_BUF_STATE_HIGH:
+					*reventsp |= (POLLOUT | POLLWRNORM);
+				break;
+				default:
+				break;
+			}
+		break;
+		case DEV_VIDEO:
+			switch (player->VideoBufferState)
+			{
+				case HI_UNF_AVPLAY_BUF_STATE_BUTT:
+				case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
+				case HI_UNF_AVPLAY_BUF_STATE_LOW:
+				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
+				//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
+					if (condition)
+						*reventsp |= (POLLOUT | POLLWRNORM);
+				break;
+				default:
+				break;
+			}
+		break;
+	}
+	pthread_mutex_unlock(&player->m_poll);
+
+	if (dev_type == DEV_VIDEO)
+	{
+		pthread_mutex_lock(&player->m_event);
+		if (player->event_status != 0)
+			*reventsp |= POLLPRI;
+		pthread_mutex_unlock(&player->m_event);
+	}
+
+	return 0;
 }
 
 int player_write(int dev_type, const char *buf, size_t size)
@@ -1713,11 +1843,11 @@ struct class_ops *player_get_ops(void)
     player_ops.sync				= player_sync;
 	player_ops.channel			= player_channel;
 	player_ops.status			= player_get_status;
-	player_ops.have_event		= player_have_event;
 	player_ops.get_event		= player_get_event;
 	player_ops.get_vsize		= player_get_vsize;
 	player_ops.get_framerate	= player_get_framerate;
 	player_ops.get_pts			= player_get_pts;
+	player_ops.poll				= player_poll;
 	player_ops.write			= player_write;
 
 	return &player_ops;

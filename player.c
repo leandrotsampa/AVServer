@@ -172,7 +172,10 @@ void *p2t_thread(void *data)
 
 			free = (int)((pStatus.u32BufSize - pStatus.u32UsedSize) / 188);
 			if (free <= 0)
+			{
+				usleep(1000);
 				continue;
+			}
 
 			size = get_max_read_size(player->m_buffer);
 			if (size > free * TS_SIZE)

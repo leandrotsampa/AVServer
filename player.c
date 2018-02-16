@@ -558,6 +558,7 @@ bool player_create(void)
 	pthread_mutex_init(&player->m_poll, NULL);
 	pthread_mutex_init(&player->m_write, NULL);
 	pthread_cond_init(&player->m_condition, NULL);
+	player->m_buffer = create_buf(16 * 1024 * 1024);
 
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
@@ -639,6 +640,7 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
 
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
+		free_buf(player->m_buffer);
 		if (player->hTsBuffer)
 			HI_UNF_DMX_DestroyTSBuffer(player->hTsBuffer);
 

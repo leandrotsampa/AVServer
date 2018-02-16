@@ -125,7 +125,7 @@ int dvb_filter_pes2ts_cb(void *priv, unsigned char *data)
 {
 	struct s_player *player = (struct s_player *)priv;
 
-	if (!write_to_buf(player->m_buffer, (char *)data, TS_SIZE))
+	if (!write_to_buf_timeout(player->m_buffer, (char *)data, TS_SIZE, 10))
 		printf("[ERROR] %s: Failed to write in TS buffer.\n", __FUNCTION__);
 
 	return 0;

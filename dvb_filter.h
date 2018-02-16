@@ -22,33 +22,6 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef signed char           s8;
-typedef char                  u8;
-typedef short                 s16;
-typedef unsigned short        u16;
-typedef int                   s32;
-typedef unsigned int          u32;
-typedef long long             s64;
-typedef unsigned long long    u64;
-
-//#include "demux.h"
-
-typedef int (dvb_filter_pes2ts_cb_t) (void *, unsigned char *);
-
-struct dvb_filter_pes2ts {
-	unsigned char buf[188];
-	unsigned char cc;
-	dvb_filter_pes2ts_cb_t *cb;
-	void *priv;
-};
-
-void dvb_filter_pes2ts_init(struct dvb_filter_pes2ts *p2ts, unsigned short pid,
-			    dvb_filter_pes2ts_cb_t *cb, void *priv);
-
-int dvb_filter_pes2ts(struct dvb_filter_pes2ts *p2ts, unsigned char *pes,
-		      int len, int payload_start);
-
-
 #define PROG_STREAM_MAP  0xBC
 #define PRIVATE_STREAM1  0xBD
 #define PADDING_STREAM   0xBE
@@ -90,7 +63,6 @@ int dvb_filter_pes2ts(struct dvb_filter_pes2ts *p2ts, unsigned char *pes,
 #define INIT_DISP_HORIZONTAL_SIZE   540
 #define INIT_DISP_VERTICAL_SIZE     576
 
-
 //flags2
 #define PTS_DTS_FLAGS    0xC0
 #define ESCR_FLAG        0x20
@@ -131,9 +103,30 @@ int dvb_filter_pes2ts(struct dvb_filter_pes2ts *p2ts, unsigned char *pes,
 #define PIECE_RATE     0x40
 #define SEAM_SPLICE    0x20
 
-
 #define MAX_PLENGTH 0xFFFF
 #define MMAX_PLENGTH (256*MAX_PLENGTH)
+
+typedef signed char           s8;
+typedef char                  u8;
+typedef short                 s16;
+typedef unsigned short        u16;
+typedef int                   s32;
+typedef unsigned int          u32;
+typedef long long             s64;
+typedef unsigned long long    u64;
+
+typedef int (dvb_filter_pes2ts_cb_t) (void *, unsigned char *);
+
+struct dvb_filter_pes2ts {
+	unsigned char buf[TS_SIZE];
+	unsigned char cc;
+	dvb_filter_pes2ts_cb_t *cb;
+	void *priv;
+};
+
+void dvb_filter_pes2ts_init(struct dvb_filter_pes2ts *p2ts, unsigned short pid, dvb_filter_pes2ts_cb_t *cb, void *priv);
+void dvb_filter_pes2ts_set_pid(struct dvb_filter_pes2ts *p2ts, unsigned short pid);
+int dvb_filter_pes2ts(struct dvb_filter_pes2ts *p2ts, unsigned char *pes, int len, int payload_start);
 
 #ifndef IPACKS
 #define IPACKS 2048
@@ -249,6 +242,5 @@ struct dvb_audio_info {
 };
 
 int dvb_filter_get_ac3info(u8 *mbuf, int count, struct dvb_audio_info *ai, int pr);
-
 
 #endif

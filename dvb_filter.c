@@ -77,6 +77,16 @@ void dvb_filter_pes2ts_init(struct dvb_filter_pes2ts *p2ts, unsigned short pid, 
 	p2ts->priv=priv;
 }
 
+void dvb_filter_pes2ts_set_pid(struct dvb_filter_pes2ts *p2ts, unsigned short pid)
+{
+	unsigned char *buf=p2ts->buf;
+
+	buf[0]=0x47;
+	buf[1]=(pid>>8);
+	buf[2]=pid&0xff;
+	p2ts->cc=0;
+}
+
 int dvb_filter_pes2ts(struct dvb_filter_pes2ts *p2ts, unsigned char *pes, int len, int payload_start)
 {
 	unsigned char *buf=p2ts->buf;

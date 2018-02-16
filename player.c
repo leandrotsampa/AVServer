@@ -584,6 +584,8 @@ bool player_create(void)
 
 	player_ops.priv = player;
 	pthread_create(&player->m_thread, NULL, p2t_thread, NULL);
+	dvb_filter_pes2ts_init(&player->p2t[0], 0, dvb_filter_pes2ts_cb, player_ops.priv);
+	dvb_filter_pes2ts_init(&player->p2t[1], 0, dvb_filter_pes2ts_cb, player_ops.priv);
 	player_create_painel();
 	return true;
 
@@ -878,7 +880,7 @@ bool player_set_pid(int dev_type, int pid)
 			if (HI_UNF_AVPLAY_GetDmxAudChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
 				player_set_keyhandler(hChannel, pid);
 
-			dvb_filter_pes2ts_init(&player->p2t[0], pid, dvb_filter_pes2ts_cb, player);
+			dvb_filter_pes2ts_set_pid(&player->p2t[0], pid);
 			player->AudioPid = pid;
 		break;
 		case DEV_VIDEO:
@@ -899,7 +901,7 @@ bool player_set_pid(int dev_type, int pid)
 			if (HI_UNF_AVPLAY_GetDmxVidChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
 				player_set_keyhandler(hChannel, pid);
 
-			dvb_filter_pes2ts_init(&player->p2t[1], pid, dvb_filter_pes2ts_cb, player);
+			dvb_filter_pes2ts_set_pid(&player->p2t[1], pid);
 			player->VideoPid = pid;
 		break;
 	}
@@ -967,7 +969,12 @@ bool player_set_mode(int mode)
 		if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
 		{
 			if (enFromPortId == HI_UNF_DMX_PORT_RAM_0)
+			{
+				if (!player->IsPES)
+					goto PES;
+
 				return true;
+			}
 
 			else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
 				return false;
@@ -978,7 +985,7 @@ bool player_set_mode(int mode)
 			printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
 			return false;
 		}
-
+PES:
 		player->IsPES = true;
 	}
 	else

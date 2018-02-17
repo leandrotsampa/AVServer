@@ -684,7 +684,7 @@ bool player_clear(int dev_type)
 
 	pthread_mutex_lock(&player->m_write);
 	if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
-		printf("[ERROR] %s: Failed to reset buffer for device type %d.\n", __FUNCTION__, dev_type);
+		printf("[ERROR] %s: Failed to reset buffer.\n", __FUNCTION__);
 
 	if (get_max_read_size(player->m_buffer) > 0)
 	{
@@ -974,6 +974,9 @@ bool player_set_mode(int mode)
 		HI_UNF_DMX_PORT_E enFromPortId;
 
 		/** Reset buffers **/
+		if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
+			printf("[ERROR] %s: Failed to reset buffer.\n", __FUNCTION__);
+
 		if (get_max_read_size(player->m_buffer) > 0)
 		{
 			buf = malloc(get_max_read_size(player->m_buffer));
@@ -1545,7 +1548,6 @@ bool player_get_pts(int dev_type, long long *pts)
 		return false;
 	}
 
-	pthread_mutex_lock(&player->m_write);
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
@@ -1559,7 +1561,6 @@ bool player_get_pts(int dev_type, long long *pts)
 			pthread_mutex_unlock(&player->m_vpts);
 		break;
 	}
-	pthread_mutex_unlock(&player->m_write);
 
 	return (*pts != HI_INVALID_PTS);
 }
@@ -1738,45 +1739,6 @@ int player_write(int dev_type, const char *buf, size_t size)
 		IsHeader = true;
 
 	dvb_filter_pes2ts(p2t, (void *)buf, size, IsHeader);
-
-	/*time_t seconds = 10;
-	time_t start = time(NULL);
-	time_t endwait = start + seconds;
-
-	while (start < endwait)
-	{
-		pthread_mutex_lock(&player->m_write);
-		if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, ts_total_size, &sBuf, 1000) == HI_SUCCESS)
-		{
-			int ret = 0;
-			char *from = malloc(data_size);
-
-			if (!read_buf(rbuf, from, IsHeader ? data_size : data_size - size))
-				printf("[ERROR] %s: Failed to read buffer for device type %d.\n", __FUNCTION__, dev_type);
-			if (!IsHeader)
-				memcpy(&from[data_size - size], buf, size);
-
-			//player_pes2ts(player, sBuf.pu8Data, from, data_size);
-
-			if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, ts_total_size) == HI_SUCCESS)
-			{
-				ret = size;
-
-				if (IsHeader)
-				{
-					write_to_buf(rbuf, (char *)buf, size);
-					*pkt_size = ((buf[4]<<8) | buf[5]) + 6;
-				}
-			}
-			else
-				printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
-
-			pthread_mutex_unlock(&player->m_write);
-			return ret;
-		}
-		pthread_mutex_unlock(&player->m_write);
-		start = time(NULL);
-	};*/
 
 	return size;
 }

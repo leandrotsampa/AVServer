@@ -1375,11 +1375,40 @@ bool player_sync(bool sync)
 bool player_channel(int channel)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, channel);
+	HI_UNF_TRACK_MODE_E tMode;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
 	{
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	switch (channel)
+	{
+		case 0:
+			tMode = HI_UNF_TRACK_MODE_STEREO;
+		break;
+		case 1:
+			tMode = HI_UNF_TRACK_MODE_ONLY_LEFT;
+		break;
+		case 2:
+			tMode = HI_UNF_TRACK_MODE_ONLY_RIGHT;
+		break;
+		case 3:
+			tMode = HI_UNF_TRACK_MODE_DOUBLE_MONO;
+		break;
+		case 4:
+			tMode = HI_UNF_TRACK_MODE_EXCHANGE;
+		break;
+		default:
+			return false;
+		break;
+	}
+
+	if (HI_UNF_SND_SetTrackChannelMode(player->hTrack, tMode) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s: Failed to set channel to %d.\n", __FUNCTION__, channel);
 		return false;
 	}
 

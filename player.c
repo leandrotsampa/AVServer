@@ -1597,7 +1597,7 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				case HI_UNF_AVPLAY_BUF_STATE_LOW:
 				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
 				case HI_UNF_AVPLAY_BUF_STATE_HIGH:
-					if (get_max_write_size(player->m_buffer) >= 1024 * 1024)
+					if (get_max_write_size(player->m_buffer) >= 20 * 1024)
 						*reventsp |= (POLLOUT | POLLWRNORM);
 				break;
 				default:

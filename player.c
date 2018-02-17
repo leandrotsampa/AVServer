@@ -125,8 +125,8 @@ int dvb_filter_pes2ts_cb(void *priv, unsigned char *data)
 {
 	struct s_player *player = (struct s_player *)priv;
 
-	if (!write_to_buf_timeout(player->m_buffer, (char *)data, TS_SIZE, 10))
-		printf("[ERROR] %s: Failed to write in TS buffer.\n", __FUNCTION__);
+	if (!write_to_buf(player->m_buffer, (char *)data, TS_SIZE))
+		printf("[ERROR] %s: Failed to write in TS buffer. (Free %d)\n", __FUNCTION__, get_max_write_size(player->m_buffer));
 
 	return 0;
 }
@@ -686,15 +686,37 @@ bool player_clear(int dev_type)
 	if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
 		printf("[ERROR] %s: Failed to reset buffer for device type %d.\n", __FUNCTION__, dev_type);
 
-	if (dev_type == DEV_AUDIO)
+	if (get_max_read_size(player->m_buffer) > 0)
 	{
-		HI_UNF_AVPLAY_RESET_OPT_S stResetOpt;
-		pthread_mutex_lock(&player->m_apts);
-		stResetOpt.u32SeekPtsMs = player->AudioPts;
-		if (HI_UNF_AVPLAY_Reset(player->hPlayer, &stResetOpt) != HI_SUCCESS)
-			printf("[ERROR] %s: Failed to reset player for device type %d.\n", __FUNCTION__, dev_type);
-		pthread_mutex_unlock(&player->m_apts);
+		char *buf = malloc(get_max_read_size(player->m_buffer));
+		read_buf(player->m_buffer, buf, get_max_read_size(player->m_buffer));
+		free(buf);
 	}
+
+	if (HI_UNF_AVPLAY_Reset(player->hPlayer, NULL) != HI_SUCCESS)
+		printf("[ERROR] %s: Failed to reset player.\n", __FUNCTION__);
+
+	/** Remove poll from waiting state. **/
+	pthread_mutex_lock(&player->m_poll);
+	switch (dev_type)
+	{
+		case DEV_AUDIO:
+			player->AudioBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
+		break;
+		case DEV_VIDEO:
+			player->VideoBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
+		break;
+	}
+
+	if (player->poll_status & (1 << dev_type))
+	{
+		struct fuse_pollhandle *ph = player->poll_handle[dev_type];
+		fuse_notify_poll(ph);
+		fuse_pollhandle_destroy(ph);
+		player->poll_handle[dev_type] = NULL;
+		player->poll_status &= ~(1 << dev_type);
+	}
+	pthread_mutex_unlock(&player->m_poll);
 	pthread_mutex_unlock(&player->m_write);
 
 	return true;
@@ -1574,7 +1596,8 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				case HI_UNF_AVPLAY_BUF_STATE_LOW:
 				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
 				case HI_UNF_AVPLAY_BUF_STATE_HIGH:
-					*reventsp |= (POLLOUT | POLLWRNORM);
+					if (get_max_write_size(player->m_buffer) >= 1024 * 1024)
+						*reventsp |= (POLLOUT | POLLWRNORM);
 				break;
 				default:
 				break;
@@ -1588,7 +1611,7 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				case HI_UNF_AVPLAY_BUF_STATE_LOW:
 				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
 				//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
-					if (condition)
+					if (condition && get_max_write_size(player->m_buffer) >= 2 * 1024 * 1024)
 						*reventsp |= (POLLOUT | POLLWRNORM);
 				break;
 				default:

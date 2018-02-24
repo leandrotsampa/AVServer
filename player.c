@@ -80,6 +80,7 @@ struct s_player {
 	int DisplayFormat;	/* 0 Pan&Scan, 1 Letterbox, 2 Center Cut Out */
 
 	bool IsPES;
+	bool IsDVR;
 	bool IsBlank;
 	bool IsStopThread;
 	bool IsSyncEnabled;
@@ -143,7 +144,7 @@ void *p2t_thread(void *data)
 		bool HasBuffer = false;
 		bool NeedBuffer = false;
 
-		if (player->PlayerMode != 1)
+		if (player->PlayerMode != 1 && !player->IsDVR)
 		{
 			pthread_cond_wait(&player->m_condition, &lock);
 			continue;
@@ -346,7 +347,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 		player->AudioPts = aFrame->u32PtsMs * 90;
 		pthread_mutex_unlock(&player->m_apts);
 	}
-	else if (player->IsPES)
+	else if (player->IsPES || player->IsDVR)
 	{
 		pthread_mutex_lock(&player->m_poll);
 		switch (enEvent)
@@ -693,9 +694,6 @@ bool player_clear(int dev_type)
 		free(buf);
 	}
 
-	if (HI_UNF_AVPLAY_Reset(player->hPlayer, NULL) != HI_SUCCESS)
-		printf("[ERROR] %s: Failed to reset player.\n", __FUNCTION__);
-
 	/** Remove poll from waiting state. **/
 	pthread_mutex_lock(&player->m_poll);
 	switch (dev_type)
@@ -720,6 +718,17 @@ bool player_clear(int dev_type)
 	pthread_mutex_unlock(&player->m_write);
 
 	return true;
+}
+
+void player_set_dvr(bool status)
+{
+	printf("[INFO] %s(%s) -> called.\n", __FUNCTION__, status ? "true" : "false");
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+	else
+		player->IsDVR = status;
 }
 
 bool player_set_type(int dev_type, int type)
@@ -954,20 +963,6 @@ bool player_set_mode(int mode)
 			player->events[i].active = false;
 	pthread_mutex_unlock(&player->m_event);
 
-	/** Clear PTS **/
-	pthread_mutex_lock(&player->m_apts);
-	player->AudioPts = HI_INVALID_PTS;
-	pthread_mutex_unlock(&player->m_apts);
-
-	pthread_mutex_lock(&player->m_vpts);
-	player->VideoPts = HI_INVALID_PTS;
-	pthread_mutex_unlock(&player->m_vpts);
-
-	pthread_mutex_lock(&player->m_poll);
-	player->AudioBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
-	player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
-	pthread_mutex_unlock(&player->m_poll);
-
 	if (mode == 1) /* MEMORY */
 	{
 		char *buf;
@@ -1136,6 +1131,14 @@ bool player_play(int dev_type)
 				return false;
 			}
 
+			pthread_mutex_lock(&player->m_apts);
+			player->AudioPts = HI_INVALID_PTS;
+			pthread_mutex_unlock(&player->m_apts);
+
+			pthread_mutex_lock(&player->m_poll);
+			player->AudioBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
+			pthread_mutex_unlock(&player->m_poll);
+
 			player->AudioState = 1;
 		break;
 		case DEV_VIDEO:
@@ -1149,6 +1152,14 @@ bool player_play(int dev_type)
 				printf("[ERROR] %s -> Failed to play Video.\n", __FUNCTION__);
 				return false;
 			}
+
+			pthread_mutex_lock(&player->m_vpts);
+			player->VideoPts = HI_INVALID_PTS;
+			pthread_mutex_unlock(&player->m_vpts);
+
+			pthread_mutex_lock(&player->m_poll);
+			player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
+			pthread_mutex_unlock(&player->m_poll);
 
 			player->VideoState = 1;
 		break;
@@ -1605,17 +1616,6 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 	}
 
 	pthread_mutex_lock(&player->m_poll);
-	if (ph)
-	{
-		struct fuse_pollhandle *oldph = player->poll_handle[dev_type];
-
-		if (oldph)
-			fuse_pollhandle_destroy(oldph);
-
-		player->poll_status |= (1 << dev_type);
-		player->poll_handle[dev_type] = ph;
-	}
-
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
@@ -1643,21 +1643,27 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
 					if (condition && get_max_write_size(player->m_buffer) >= 2 * 1024 * 1024)
 						*reventsp |= (POLLOUT | POLLWRNORM);
-				break;
 				default:
+					pthread_mutex_lock(&player->m_event);
+					if (player->event_status != 0)
+						*reventsp |= POLLPRI;
+					pthread_mutex_unlock(&player->m_event);
 				break;
 			}
 		break;
 	}
-	pthread_mutex_unlock(&player->m_poll);
 
-	if (dev_type == DEV_VIDEO)
+	if (ph && !(*reventsp & POLLOUT))
 	{
-		pthread_mutex_lock(&player->m_event);
-		if (player->event_status != 0)
-			*reventsp |= POLLPRI;
-		pthread_mutex_unlock(&player->m_event);
+		struct fuse_pollhandle *oldph = player->poll_handle[dev_type];
+
+		if (oldph)
+			fuse_pollhandle_destroy(oldph);
+
+		player->poll_status |= (1 << dev_type);
+		player->poll_handle[dev_type] = ph;
 	}
+	pthread_mutex_unlock(&player->m_poll);
 
 	return 0;
 }
@@ -1667,7 +1673,6 @@ int player_write(int dev_type, const char *buf, size_t size)
 	bool IsHeader;
 	unsigned char c_s;
 	unsigned char c_e;
-	HI_UNF_STREAM_BUF_S sBuf;
 	struct dvb_filter_pes2ts *p2t;
 	unsigned char h = buf[0];
 	unsigned char e = buf[1];
@@ -1698,23 +1703,14 @@ int player_write(int dev_type, const char *buf, size_t size)
 				player_set_mode(1);
 
 			pthread_mutex_lock(&player->m_write);
-			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, size, &sBuf, 50000 /* 50ms */) == HI_SUCCESS)
+			if (!write_to_buf(player->m_buffer, (char *)buf, size))
 			{
-				memcpy(sBuf.pu8Data, buf, size);
-
-				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, size) == HI_SUCCESS)
-				{
-					pthread_mutex_unlock(&player->m_write);
-					return size;
-				}
-				else
-					printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
+				pthread_mutex_unlock(&player->m_write);
+				return -EAGAIN;
 			}
-			else
-				printf("[ERROR] %s: Failed to get buffer for device type %d and size %d.\n", __FUNCTION__, dev_type, size);
 			pthread_mutex_unlock(&player->m_write);
 
-			return 0;
+			return size;
 		break;
 		case DEV_PAINEL:
 		{
@@ -1777,6 +1773,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.create			= player_create;
 	player_ops.destroy			= player_destroy;
 	player_ops.clear			= player_clear;
+	player_ops.set_dvr			= player_set_dvr;
 	player_ops.set_type			= player_set_type;
 	player_ops.set_pid			= player_set_pid;
 	player_ops.set_mode			= player_set_mode;

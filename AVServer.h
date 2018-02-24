@@ -34,6 +34,7 @@ struct class_ops {
 
 	/** Call's for Player **/
 	bool (*clear)(int);
+	void (*set_dvr)(bool);
 	bool (*set_type)(int, int);
 	bool (*set_pid)(int, int);
 	bool (*set_mode)(int);

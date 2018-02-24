@@ -35,7 +35,7 @@
 
 #define AUDIO_DEV	"audio0"
 #define VIDEO_DEV	"video0"
-#define DVR_DEV		"dvr0"
+#define DVR_DEV		"dvr"
 #define PAINEL_DEV	"panel"
 
 enum {
@@ -61,7 +61,7 @@ static int dvb_hisi_file_type(const char *path)
 		return DVB_AUDIO_DEV;
 	else if (strcmp(path, "/" VIDEO_DEV) == 0)
 		return DVB_VIDEO_DEV;
-	else if (strcmp(path, "/" DVR_DEV) == 0)
+	else if (strncmp(path, "/" DVR_DEV, 4) == 0)
 		return DVB_DVR_DEV;
 	else if (strcmp(path, "/" PAINEL_DEV) == 0)
 		return DVB_PAINEL_DEV;
@@ -120,8 +120,8 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 {
 	int type = dvb_hisi_file_type(path);
-	//struct fuse_context *cxt = fuse_get_context();
-	//struct class_ops *player = (struct class_ops *)cxt->private_data;
+	struct fuse_context *cxt = fuse_get_context();
+	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
 	if (type == DVB_NONE)
 		return -ENOENT;
@@ -143,7 +143,14 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 				 * gets filled up periodically by producer thread and consumed
 				 * on read.  Tell FUSE as such.
 				 */
-				fi->fh = type;
+				if (type == DVB_DVR_DEV)
+				{
+					char filename[32];
+					snprintf(filename, sizeof(filename), "/dev/dvb/adapter%c/dvr0", path[(strlen(path)-1)]);
+					fi->fh = open(filename, O_WRONLY);
+					player->set_dvr(true);
+				}
+
 				fi->direct_io = 1;
 				fi->nonseekable = 1;
 				/* Make cache persistent even if file is closed,
@@ -188,6 +195,13 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 					player->stop(DEV_AUDIO);
 				else if (type == DVB_VIDEO_DEV && player)
 					player->stop(DEV_VIDEO);
+				else if (type == DVB_DVR_DEV)
+				{
+					if (fi->fh >= 0)
+						close(fi->fh);
+
+					player->set_dvr(false);
+				}
 			break;
 			default:
 			break;
@@ -246,6 +260,8 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 		break;
 		case DVB_DVR_DEV:
 			ret = player->write(DEV_DVR, buf, size);
+			if (ret > 0 && fi->fh >= 0)
+				write(fi->fh, buf, ret);
 		break;
 	}
 	pthread_mutex_unlock(&m_pwrite);
@@ -507,6 +523,7 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 	{
 		case DVB_AUDIO_DEV:
 			return player->poll(DEV_AUDIO, ph, reventsp, false);
+		break;
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
 			return player->poll(DEV_VIDEO, ph, reventsp, dvb_hisi_open_mask & (1 << type));

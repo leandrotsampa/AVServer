@@ -675,24 +675,23 @@ bool player_set_type(int dev_type, int type)
 	{
 		case DEV_AUDIO:
 		{
+			FILE *file;
+			char s_mode[12];
 			HA_CODEC_ID_E htype;
-
-			if (player->AudioState == 1)
-			{
-				printf("[ERROR] %s: Only can change Audio Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
-				return false;
-			}
+			HI_UNF_SND_HDMI_MODE_E h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
 
 			switch (type)
 			{
 				case AUDIO_STREAMTYPE_AC3:
 				case AUDIO_STREAMTYPE_DDP:
 					htype = HA_AUDIO_ID_DOLBY_PLUS;
+					file = fopen("/proc/stb/audio/ac3", "r");
 				break;
 				case AUDIO_STREAMTYPE_AAC:
 				case AUDIO_STREAMTYPE_AACPLUS:
 				case AUDIO_STREAMTYPE_AACHE:
 					htype = HA_AUDIO_ID_AAC;
+					file = fopen("/proc/stb/audio/aac", "r");
 				break;
 				case AUDIO_STREAMTYPE_DTS:
 				case AUDIO_STREAMTYPE_DTSHD:
@@ -721,10 +720,6 @@ bool player_set_type(int dev_type, int type)
 			}
 
 			/* Check HDMI OutPut Mode for Re-Apply this. */
-			char s_mode[12];
-			HI_UNF_SND_HDMI_MODE_E h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
-			FILE *file = fopen("/proc/stb/audio/ac3","r");
-
 			if (file)
 			{
 				fgets(s_mode, 12, file);
@@ -742,12 +737,6 @@ bool player_set_type(int dev_type, int type)
 		case DEV_VIDEO:
 		{
 			HI_UNF_VCODEC_TYPE_E htype;
-
-			if (player->VideoState == 1)
-			{
-				printf("[ERROR] %s: Only can change Video Type if is in STOPED / PAUSED state.\n", __FUNCTION__);
-				return false;
-			}
 
 			switch (type)
 			{
@@ -813,6 +802,8 @@ bool player_set_pid(int dev_type, int pid)
 		printf("[ERROR] %s(%d, %d) -> Wrong PID.\n", __FUNCTION__, dev_type, pid);
 		return false;
 	}
+	else if (player->IsPES)
+		return true;
 
 	switch (dev_type)
 	{
@@ -1278,6 +1269,12 @@ bool player_mute(bool mute)
 	if (!(player && player->IsCreated))
 	{
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	if (HI_UNF_SND_SetMute(HI_UNF_SND_0, HI_UNF_SND_OUTPUTPORT_HDMI0, mute) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s: Failed to set mute.\n", __FUNCTION__);
 		return false;
 	}
 

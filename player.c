@@ -1,6 +1,4 @@
 #include <AVServer.h>
-#include <dvb_filter.h>
-#include <ring_buf.h>
 #include <unistd.h>
 #include <hi_adp_mpi.h>
 #include <hi_common.h>
@@ -59,6 +57,11 @@
 #define VIDEO_STREAMTYPE_DIVX4		 14
 #define VIDEO_STREAMTYPE_DIVX5		 15
 
+#define AUDIO_STREAM_S   0xC0
+#define AUDIO_STREAM_E   0xDF
+#define VIDEO_STREAM_S   0xE0
+#define VIDEO_STREAM_E   0xEF
+
 #define MAX_ADAPTER	4
 #define PLAYER_DEMUX_PORT 4
 
@@ -108,11 +111,9 @@ struct s_player {
 	pthread_mutex_t m_event;
 	pthread_mutex_t m_poll;
 	pthread_mutex_t m_write;
-	pthread_cond_t m_condition;
 
-	pthread_t m_thread;
-	ring_buffer *m_buffer;
-	struct dvb_filter_pes2ts p2t[2];
+	long long m_audio_pts;
+	long long m_video_pts;
 
 	unsigned int hPlayer;
 	unsigned int hWindow;
@@ -121,89 +122,6 @@ struct s_player {
 	unsigned int hVdec;
 	unsigned int hSync;
 };
-
-int dvb_filter_pes2ts_cb(void *priv, unsigned char *data)
-{
-	struct s_player *player = (struct s_player *)priv;
-
-	if (!write_to_buf(player->m_buffer, (char *)data, TS_SIZE))
-		printf("[ERROR] %s: Failed to write in TS buffer. (Free %d)\n", __FUNCTION__, get_max_write_size(player->m_buffer));
-
-	return 0;
-}
-
-void *p2t_thread(void *data)
-{
-	pthread_mutex_t lock;
-	struct s_player *player = (struct s_player *)player_ops.priv;
-
-	pthread_mutex_init(&lock, NULL);
-
-	while(!player->IsStopThread)
-	{
-		bool HasBuffer = false;
-		bool NeedBuffer = false;
-
-		if (player->PlayerMode != 1 && !player->IsDVR)
-		{
-			pthread_cond_wait(&player->m_condition, &lock);
-			continue;
-		}
-
-		pthread_mutex_lock(&player->m_poll);
-		NeedBuffer = ((player->AudioBufferState != HI_UNF_AVPLAY_BUF_STATE_FULL) ||
-					 (player->VideoBufferState <= HI_UNF_AVPLAY_BUF_STATE_NORMAL ||
-					  player->VideoBufferState == HI_UNF_AVPLAY_BUF_STATE_BUTT));
-		pthread_mutex_unlock(&player->m_poll);
-
-		HasBuffer = (get_max_read_size(player->m_buffer) > 0);
-
-		if (NeedBuffer && HasBuffer)
-		{
-			size_t free;
-			size_t size;
-			HI_UNF_STREAM_BUF_S sBuf;
-			HI_UNF_DMX_TSBUF_STATUS_S pStatus;
-
-			if (HI_UNF_DMX_GetTSBufferStatus(player->hTsBuffer, &pStatus) != HI_SUCCESS)
-			{
-				usleep(1000);
-				continue;
-			}
-
-			free = (int)((pStatus.u32BufSize - pStatus.u32UsedSize) / 188);
-			if (free <= 0)
-			{
-				usleep(1000);
-				continue;
-			}
-
-			size = get_max_read_size(player->m_buffer);
-			if (size > free * TS_SIZE)
-				size = free * TS_SIZE;
-
-			pthread_mutex_lock(&player->m_write);
-			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, size, &sBuf, 1000) == HI_SUCCESS)
-			{
-				if (!read_buf(player->m_buffer, (void *)sBuf.pu8Data, size))
-				{
-					printf("[ERROR] %s: Failed to read buffer.\n", __FUNCTION__);
-					HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, 0);
-					pthread_mutex_unlock(&player->m_write);
-					continue;
-				}
-
-				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, size) != HI_SUCCESS)
-					printf("[ERROR] %s: Failed to put buffer.\n", __FUNCTION__);
-			}
-			pthread_mutex_unlock(&player->m_write);
-		}
-		else
-			usleep(1000 * 10);
-	}
-
-	return NULL;
-}
 
 void player_showtime(void)
 {
@@ -362,7 +280,6 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 						if (player->poll_status & (1 << DEV_AUDIO))
 						{
 							struct fuse_pollhandle *ph = player->poll_handle[DEV_AUDIO];
-							printf("[INFO] %s: Notify poll type Audio Poll status %d.\n", __FUNCTION__, (HI_UNF_AVPLAY_BUF_STATE_E)para);
 							fuse_notify_poll(ph);
 							fuse_pollhandle_destroy(ph);
 							player->poll_handle[DEV_AUDIO] = NULL;
@@ -381,11 +298,10 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 					case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
 					case HI_UNF_AVPLAY_BUF_STATE_LOW:
 					case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
-					//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
+					case HI_UNF_AVPLAY_BUF_STATE_HIGH:
 						if (player->poll_status & (1 << DEV_VIDEO))
 						{
 							struct fuse_pollhandle *ph = player->poll_handle[DEV_VIDEO];
-							printf("[INFO] %s: Notify poll type Video Poll status %d.\n", __FUNCTION__, (HI_UNF_AVPLAY_BUF_STATE_E)para);
 							fuse_notify_poll(ph);
 							fuse_pollhandle_destroy(ph);
 							player->poll_handle[DEV_VIDEO] = NULL;
@@ -410,6 +326,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 bool player_create(void)
 {
 	printf("[INFO] %s -> called.\n", __FUNCTION__);
+	DIR *lib_dir;
 	HI_UNF_SYNC_ATTR_S       stSyncAttr;
 	HI_UNF_AVPLAY_ATTR_S     stAvplayAttr;
 	HI_UNF_AVPLAY_OPEN_OPT_S OpenOpt;
@@ -461,7 +378,28 @@ bool player_create(void)
 		goto DMX_DEINIT;
 	}
 
-	if (HIADP_AVPlay_RegADecLib() != HI_SUCCESS)
+	/** Auto load all codecs **/
+	lib_dir = opendir ("/usr/lib");
+	if (lib_dir)
+	{
+		struct dirent *file = readdir(lib_dir);
+
+		while (file)
+		{
+			if (strncmp(file->d_name, "libHA.AUDIO.", 12) == 0)
+				if (HI_UNF_AVPLAY_RegisterAcodecLib(file->d_name) != HI_SUCCESS)
+					printf("[ERROR] %s: Failed to Register Audio library %s\n", __FUNCTION__, file->d_name);
+
+			if (strncmp(file->d_name, "libHV.VIDEO.", 12) == 0)
+				if (HI_UNF_AVPLAY_RegisterVcodecLib(file->d_name) != HI_SUCCESS)
+					printf("[ERROR] %s: Failed to Register Video library %s\n", __FUNCTION__, file->d_name);
+
+			file = readdir(lib_dir);
+		}
+
+		closedir (lib_dir);
+	}
+	else if (HIADP_AVPlay_RegADecLib() != HI_SUCCESS)
 		printf("[ERROR] %s -> HIADP_AVPlay_RegADecLib failed.\n", __FUNCTION__);
 
 	if (HI_UNF_AVPLAY_Init() != HI_SUCCESS)
@@ -472,8 +410,8 @@ bool player_create(void)
 
 	HI_UNF_AVPLAY_GetDefaultConfig(&stAvplayAttr, HI_UNF_AVPLAY_STREAM_TYPE_TS);
 	stAvplayAttr.u32DemuxId = PLAYER_DEMUX_PORT;
-	stAvplayAttr.stStreamAttr.u32AudBufSize = 4 * 1024 * 1024; // Allocate 4MB
-	stAvplayAttr.stStreamAttr.u32VidBufSize = 9 * 1024 * 1024; // Allocate 9MB
+	stAvplayAttr.stStreamAttr.u32AudBufSize = 4 * 1024 * 1024;  // Allocate 4MB
+	stAvplayAttr.stStreamAttr.u32VidBufSize = 16 * 1024 * 1024; // Allocate 16MB
 	if (HI_UNF_AVPLAY_Create(&stAvplayAttr, &player->hPlayer) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_AVPLAY_Create failed.\n", __FUNCTION__);
@@ -561,8 +499,6 @@ bool player_create(void)
 	pthread_mutex_init(&player->m_event, NULL);
 	pthread_mutex_init(&player->m_poll, NULL);
 	pthread_mutex_init(&player->m_write, NULL);
-	pthread_cond_init(&player->m_condition, NULL);
-	player->m_buffer = create_buf(16 * 1024 * 1024);
 
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
@@ -584,9 +520,6 @@ bool player_create(void)
 	player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
 
 	player_ops.priv = player;
-	pthread_create(&player->m_thread, NULL, p2t_thread, NULL);
-	dvb_filter_pes2ts_init(&player->p2t[0], 0, dvb_filter_pes2ts_cb, player_ops.priv);
-	dvb_filter_pes2ts_init(&player->p2t[1], 0, dvb_filter_pes2ts_cb, player_ops.priv);
 	player_create_painel();
 	return true;
 
@@ -646,7 +579,6 @@ void player_destroy(void)
 		HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID);
 
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
-		free_buf(player->m_buffer);
 		if (player->hTsBuffer)
 			HI_UNF_DMX_DestroyTSBuffer(player->hTsBuffer);
 
@@ -684,21 +616,18 @@ bool player_clear(int dev_type)
 	}
 
 	pthread_mutex_lock(&player->m_write);
-	if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
-		printf("[ERROR] %s: Failed to reset buffer.\n", __FUNCTION__);
-
-	if (get_max_read_size(player->m_buffer) > 0)
-	{
-		char *buf = malloc(get_max_read_size(player->m_buffer));
-		read_buf(player->m_buffer, buf, get_max_read_size(player->m_buffer));
-		free(buf);
-	}
+	if (player->AudioState != 0 && player->VideoState != 0)
+		if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
+			printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
 
 	/** Remove poll from waiting state. **/
 	pthread_mutex_lock(&player->m_poll);
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
+			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to Reset player.\n", __FUNCTION__);
+
 			player->AudioBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
 		break;
 		case DEV_VIDEO:
@@ -757,14 +686,8 @@ bool player_set_type(int dev_type, int type)
 			switch (type)
 			{
 				case AUDIO_STREAMTYPE_AC3:
+				case AUDIO_STREAMTYPE_DDP:
 					htype = HA_AUDIO_ID_DOLBY_PLUS;
-				break;
-				case AUDIO_STREAMTYPE_MPEG:
-				case AUDIO_STREAMTYPE_MP3:
-					htype = HA_AUDIO_ID_MP3;
-				break;
-				case AUDIO_STREAMTYPE_LPCM:
-					htype = HA_AUDIO_ID_PCM;
 				break;
 				case AUDIO_STREAMTYPE_AAC:
 				case AUDIO_STREAMTYPE_AACPLUS:
@@ -775,12 +698,12 @@ bool player_set_type(int dev_type, int type)
 				case AUDIO_STREAMTYPE_DTSHD:
 					htype = HA_AUDIO_ID_DTSHD;
 				break;
-				case AUDIO_STREAMTYPE_DDP:
-					htype = HA_AUDIO_ID_DOLBY_PLUS;
-				break;
 				case AUDIO_STREAMTYPE_RAW:
+				case AUDIO_STREAMTYPE_LPCM:
 					htype = HA_AUDIO_ID_PCM;
 				break;
+				case AUDIO_STREAMTYPE_MP3:
+				case AUDIO_STREAMTYPE_MPEG:
 				default: /* FallBack to MP3 */
 					htype = HA_AUDIO_ID_MP3;
 				break;
@@ -911,7 +834,6 @@ bool player_set_pid(int dev_type, int pid)
 			if (HI_UNF_AVPLAY_GetDmxAudChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
 				player_set_keyhandler(hChannel, pid);
 
-			dvb_filter_pes2ts_set_pid(&player->p2t[0], pid);
 			player->AudioPid = pid;
 		break;
 		case DEV_VIDEO:
@@ -932,7 +854,6 @@ bool player_set_pid(int dev_type, int pid)
 			if (HI_UNF_AVPLAY_GetDmxVidChnHandle(player->hPlayer, &hChannel) == HI_SUCCESS)
 				player_set_keyhandler(hChannel, pid);
 
-			dvb_filter_pes2ts_set_pid(&player->p2t[1], pid);
 			player->VideoPid = pid;
 		break;
 	}
@@ -965,54 +886,63 @@ bool player_set_mode(int mode)
 
 	if (mode == 1) /* MEMORY */
 	{
-		char *buf;
-		HI_UNF_DMX_PORT_E enFromPortId;
+		if (player->AudioState != 0 && player->VideoState != 0)
+			if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
 
-		/** Reset buffers **/
-		if (HI_UNF_DMX_ResetTSBuffer(player->hTsBuffer) != HI_SUCCESS)
-			printf("[ERROR] %s: Failed to reset buffer.\n", __FUNCTION__);
-
-		if (get_max_read_size(player->m_buffer) > 0)
+		/** Change to ES Mode **/
+		if (stAvplayAttr.stStreamAttr.enStreamType != HI_UNF_AVPLAY_STREAM_TYPE_ES)
 		{
-			buf = malloc(get_max_read_size(player->m_buffer));
-			read_buf(player->m_buffer, buf, get_max_read_size(player->m_buffer));
-			free(buf);
+			stAvplayAttr.stStreamAttr.enStreamType = HI_UNF_AVPLAY_STREAM_TYPE_ES;
+			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change to Memory Mode.\n", __FUNCTION__);
 		}
 
-		/** Set PIDs if necessary. **/
-		if (!(player->AudioPid > 0 && player->AudioPid < 0x1FFFF))
-			player_set_pid(DEV_AUDIO, 100);
-		if (!(player->VideoPid > 0 && player->VideoPid < 0x1FFFF))
-			player_set_pid(DEV_VIDEO, 101);
-
-		/** Change Port **/
-		if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
-		{
-			if (enFromPortId == HI_UNF_DMX_PORT_RAM_0)
-			{
-				if (!player->IsPES)
-					goto PES;
-
-				return true;
-			}
-
-			else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
-				return false;
-		}
-
-		if (HI_UNF_DMX_AttachTSPort(stAvplayAttr.u32DemuxId, HI_UNF_DMX_PORT_RAM_0) != HI_SUCCESS)
-		{
-			printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
-			return false;
-		}
-PES:
+		player->AudioPid = 0;
+		player->VideoPid = 0;
 		player->IsPES = true;
 	}
 	else
+	{
 		player->IsPES = false;
 
+		if (player->IsDVR)
+		{
+			HI_UNF_DMX_PORT_E enFromPortId;
+
+			/** Change Port **/
+			if (HI_UNF_DMX_GetTSPortId(stAvplayAttr.u32DemuxId, &enFromPortId) == HI_SUCCESS)
+			{
+				if (enFromPortId == HI_UNF_DMX_PORT_RAM_0)
+					goto TS;
+				else if (HI_UNF_DMX_DetachTSPort(stAvplayAttr.u32DemuxId) != HI_SUCCESS)
+					return false;
+			}
+
+			if (HI_UNF_DMX_AttachTSPort(stAvplayAttr.u32DemuxId, HI_UNF_DMX_PORT_RAM_0) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s -> Failed to set Mode %d.\n", __FUNCTION__, mode);
+				return false;
+			}
+		}
+
+TS:
+		/** Change to TS Mode **/
+		if (stAvplayAttr.stStreamAttr.enStreamType != HI_UNF_AVPLAY_STREAM_TYPE_TS)
+		{
+			player_ops.stop(DEV_AUDIO);
+			player_ops.stop(DEV_VIDEO);
+
+			stAvplayAttr.stStreamAttr.enStreamType = HI_UNF_AVPLAY_STREAM_TYPE_TS;
+			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change to Demux Mode.\n", __FUNCTION__);
+
+			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to Reset player.\n", __FUNCTION__);
+		}
+	}
+
 	player->PlayerMode = mode;
-	pthread_cond_signal(&player->m_condition);
 
 	return true;
 }
@@ -1626,8 +1556,7 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				case HI_UNF_AVPLAY_BUF_STATE_LOW:
 				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
 				case HI_UNF_AVPLAY_BUF_STATE_HIGH:
-					if (get_max_write_size(player->m_buffer) >= 20 * 1024)
-						*reventsp |= (POLLOUT | POLLWRNORM);
+					*reventsp |= (POLLOUT | POLLWRNORM);
 				break;
 				default:
 				break;
@@ -1640,8 +1569,8 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				case HI_UNF_AVPLAY_BUF_STATE_EMPTY:
 				case HI_UNF_AVPLAY_BUF_STATE_LOW:
 				case HI_UNF_AVPLAY_BUF_STATE_NORMAL:
-				//case HI_UNF_AVPLAY_BUF_STATE_HIGH: /* Adicionar para teste no futuro. */
-					if (condition && get_max_write_size(player->m_buffer) >= 2 * 1024 * 1024)
+				case HI_UNF_AVPLAY_BUF_STATE_HIGH:
+					if (condition)
 						*reventsp |= (POLLOUT | POLLWRNORM);
 				default:
 					pthread_mutex_lock(&player->m_event);
@@ -1671,9 +1600,11 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 int player_write(int dev_type, const char *buf, size_t size)
 {
 	bool IsHeader;
+	long long *pts;
 	unsigned char c_s;
 	unsigned char c_e;
-	struct dvb_filter_pes2ts *p2t;
+	HI_UNF_STREAM_BUF_S sBuf;
+	HI_UNF_AVPLAY_BUFID_E bID;
 	unsigned char h = buf[0];
 	unsigned char e = buf[1];
 	unsigned char a = buf[2];
@@ -1691,26 +1622,42 @@ int player_write(int dev_type, const char *buf, size_t size)
 		case DEV_AUDIO:
 			c_s = AUDIO_STREAM_S;
 			c_e = AUDIO_STREAM_E;
-			p2t = &player->p2t[0];
+			bID = HI_UNF_AVPLAY_BUF_ID_ES_AUD;
+			pts = &player->m_audio_pts;
 		break;
 		case DEV_VIDEO:
 			c_s = VIDEO_STREAM_S;
 			c_e = VIDEO_STREAM_E;
-			p2t = &player->p2t[1];
+			bID = HI_UNF_AVPLAY_BUF_ID_ES_VID;
+			pts = &player->m_video_pts;
 		break;
 		case DEV_DVR:
-			if (player->PlayerMode != 1)
-				player_set_mode(1);
+		{
+			HI_UNF_STREAM_BUF_S sBuf;
+			HI_UNF_DMX_TSBUF_STATUS_S pStatus;
+
+			if (HI_UNF_DMX_GetTSBufferStatus(player->hTsBuffer, &pStatus) != HI_SUCCESS ||
+			   (pStatus.u32BufSize - pStatus.u32UsedSize) < size)
+			{
+				usleep(1000);
+				return -EAGAIN;
+			}
 
 			pthread_mutex_lock(&player->m_write);
-			if (!write_to_buf(player->m_buffer, (char *)buf, size))
+			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, size, &sBuf, 1000) == HI_SUCCESS)
 			{
-				pthread_mutex_unlock(&player->m_write);
-				return -EAGAIN;
+				memcpy(sBuf.pu8Data, buf, size);
+				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, size) != HI_SUCCESS)
+				{
+					printf("[ERROR] %s: Failed to put buffer.\n", __FUNCTION__);
+					pthread_mutex_unlock(&player->m_write);
+					return -EAGAIN;
+				}
 			}
 			pthread_mutex_unlock(&player->m_write);
 
 			return size;
+		}
 		break;
 		case DEV_PAINEL:
 		{
@@ -1763,7 +1710,47 @@ int player_write(int dev_type, const char *buf, size_t size)
 	if (h == 0x00 && e == 0x00 && a == 0x01 && d >= c_s && d <= c_e)
 		IsHeader = true;
 
-	dvb_filter_pes2ts(p2t, (void *)buf, size, IsHeader);
+	/* Extract PTS from header. */
+	if (IsHeader)
+	{
+		if ((buf[7] & 0x80) >> 7) /* PTS */
+		{
+			HI_U32 PTSLow = 0;
+
+			PTSLow = (((buf[9] & 0x06) >> 1) << 30)
+					| ((buf[10]) << 22)
+					| (((buf[11] & 0xfe) >> 1) << 15)
+					| ((buf[12]) << 7)
+					| (((buf[13] & 0xfe)) >> 1);
+
+			if (buf[9] & 0x08)
+				*pts = (PTSLow / 90) + 0x2D82D82; //(1 << 32) / 90;
+			else
+				*pts = (PTSLow / 90);
+		}
+
+		/* Not need write Header for Audio. */
+		if (dev_type == DEV_AUDIO)
+			return size;
+	}
+
+	pthread_mutex_lock(&player->m_write);
+	if (HI_UNF_AVPLAY_GetBuf(player->hPlayer, bID, size, &sBuf, 0) != HI_SUCCESS)
+	{
+		pthread_mutex_unlock(&player->m_write);
+		usleep(1000);
+		return 0;
+	}
+
+	memcpy(sBuf.pu8Data, buf, size);
+	if (HI_UNF_AVPLAY_PutBuf(player->hPlayer, bID, size, *pts) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
+		pthread_mutex_unlock(&player->m_write);
+		usleep(1000);
+		return 0;
+	}
+	pthread_mutex_unlock(&player->m_write);
 
 	return size;
 }

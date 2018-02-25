@@ -675,9 +675,9 @@ bool player_set_type(int dev_type, int type)
 	{
 		case DEV_AUDIO:
 		{
-			FILE *file;
 			char s_mode[12];
 			HA_CODEC_ID_E htype;
+			FILE *file = NULL;
 			HI_UNF_SND_HDMI_MODE_E h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
 
 			switch (type)
@@ -685,13 +685,13 @@ bool player_set_type(int dev_type, int type)
 				case AUDIO_STREAMTYPE_AC3:
 				case AUDIO_STREAMTYPE_DDP:
 					htype = HA_AUDIO_ID_DOLBY_PLUS;
-					file = fopen("/proc/stb/audio/ac3", "r");
+					file  = fopen("/proc/stb/audio/ac3", "r");
 				break;
 				case AUDIO_STREAMTYPE_AAC:
 				case AUDIO_STREAMTYPE_AACPLUS:
 				case AUDIO_STREAMTYPE_AACHE:
 					htype = HA_AUDIO_ID_AAC;
-					file = fopen("/proc/stb/audio/aac", "r");
+					file  = fopen("/proc/stb/audio/aac", "r");
 				break;
 				case AUDIO_STREAMTYPE_DTS:
 				case AUDIO_STREAMTYPE_DTSHD:

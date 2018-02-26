@@ -112,9 +112,6 @@ struct s_player {
 	pthread_mutex_t m_poll;
 	pthread_mutex_t m_write;
 
-	long long m_audio_pts;
-	long long m_video_pts;
-
 	unsigned int hPlayer;
 	unsigned int hWindow;
 	unsigned int hTrack;
@@ -250,22 +247,8 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 				player->event_status |= (1 << player->events[2].type);
 				pthread_mutex_unlock(&player->m_event);
 			}
-
-		/** Set PTS **/
-		pthread_mutex_lock(&player->m_vpts);
-		player->VideoPts = vFrame->u32Pts * 90;
-		pthread_mutex_unlock(&player->m_vpts);
 	}
-	else if (enEvent == HI_UNF_AVPLAY_EVENT_NEW_AUD_FRAME)
-	{
-		HI_UNF_AO_FRAMEINFO_S *aFrame = (HI_UNF_AO_FRAMEINFO_S *)para;
-
-		/** Set PTS **/
-		pthread_mutex_lock(&player->m_apts);
-		player->AudioPts = aFrame->u32PtsMs * 90;
-		pthread_mutex_unlock(&player->m_apts);
-	}
-	else if (player->IsPES || player->IsDVR)
+	else if (player->IsPES)
 	{
 		pthread_mutex_lock(&player->m_poll);
 		switch (enEvent)
@@ -476,8 +459,6 @@ bool player_create(void)
 
 	if (HI_UNF_DMX_CreateTSBuffer(HI_UNF_DMX_PORT_RAM_0, 0x1000000, &player->hTsBuffer) != HI_SUCCESS)
 		printf("[WARNING] %s -> Failed to create TS buffer.\n", __FUNCTION__);
-	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_AUD_FRAME, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
-		printf("[WARNING] %s -> Failed to register audio event callback.\n", __FUNCTION__);
 	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
 		printf("[WARNING] %s -> Failed to register video event callback.\n", __FUNCTION__);
 	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_AUD_BUF_STATE, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
@@ -570,7 +551,6 @@ void player_destroy(void)
 
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_NULL);
 		HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop);
-		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_AUD_FRAME);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_NEW_VID_FRAME);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_AUD_BUF_STATE);
 		HI_UNF_AVPLAY_UnRegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_VID_BUF_STATE);
@@ -616,7 +596,7 @@ bool player_clear(int dev_type)
 	}
 
 	pthread_mutex_lock(&player->m_write);
-	if (player->AudioState != 0 && player->VideoState != 0)
+	if (player->IsPES)
 		if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
 			printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
 
@@ -877,10 +857,6 @@ bool player_set_mode(int mode)
 
 	if (mode == 1) /* MEMORY */
 	{
-		if (player->AudioState != 0 && player->VideoState != 0)
-			if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
-				printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
-
 		/** Change to ES Mode **/
 		if (stAvplayAttr.stStreamAttr.enStreamType != HI_UNF_AVPLAY_STREAM_TYPE_ES)
 		{
@@ -927,9 +903,6 @@ TS:
 			stAvplayAttr.stStreamAttr.enStreamType = HI_UNF_AVPLAY_STREAM_TYPE_TS;
 			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_STREAM_MODE, &stAvplayAttr) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to change to Demux Mode.\n", __FUNCTION__);
-
-			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
-				printf("[ERROR] %s: Failed to Reset player.\n", __FUNCTION__);
 		}
 	}
 
@@ -1052,10 +1025,6 @@ bool player_play(int dev_type)
 				return false;
 			}
 
-			pthread_mutex_lock(&player->m_apts);
-			player->AudioPts = HI_INVALID_PTS;
-			pthread_mutex_unlock(&player->m_apts);
-
 			pthread_mutex_lock(&player->m_poll);
 			player->AudioBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
 			pthread_mutex_unlock(&player->m_poll);
@@ -1073,10 +1042,6 @@ bool player_play(int dev_type)
 				printf("[ERROR] %s -> Failed to play Video.\n", __FUNCTION__);
 				return false;
 			}
-
-			pthread_mutex_lock(&player->m_vpts);
-			player->VideoPts = HI_INVALID_PTS;
-			pthread_mutex_unlock(&player->m_vpts);
 
 			pthread_mutex_lock(&player->m_poll);
 			player->VideoBufferState= HI_UNF_AVPLAY_BUF_STATE_BUTT;
@@ -1507,6 +1472,7 @@ bool player_get_framerate(unsigned int *framerate)
 
 bool player_get_pts(int dev_type, long long *pts)
 {
+	HI_UNF_AVPLAY_STATUS_INFO_S stStatusInfo;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -1515,21 +1481,26 @@ bool player_get_pts(int dev_type, long long *pts)
 		return false;
 	}
 
-	switch (dev_type)
+	*pts = 0;
+	if (HI_UNF_AVPLAY_GetStatusInfo(player->hPlayer, &stStatusInfo) == HI_SUCCESS)
 	{
-		case DEV_AUDIO:
-			pthread_mutex_lock(&player->m_apts);
-			*pts = player->AudioPts;
-			pthread_mutex_unlock(&player->m_apts);
-		break;
-		case DEV_VIDEO:
-			pthread_mutex_lock(&player->m_vpts);
-			*pts = player->VideoPts;
-			pthread_mutex_unlock(&player->m_vpts);
-		break;
+		long long AudioPTS = stStatusInfo.stSyncStatus.u32LastAudPts;
+		long long VideoPTS = stStatusInfo.stSyncStatus.u32LastVidPts;
+
+		switch (dev_type)
+		{
+			case DEV_AUDIO:
+				if (AudioPTS != HI_INVALID_PTS)
+					*pts = AudioPTS * 90;
+			break;
+			case DEV_VIDEO:
+				if (VideoPTS != HI_INVALID_PTS)
+					*pts = VideoPTS * 90;
+			break;
+		}
 	}
 
-	return (*pts != HI_INVALID_PTS);
+	return (*pts != 0);
 }
 
 int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bool condition)
@@ -1577,6 +1548,22 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 				break;
 			}
 		break;
+		case DEV_DVR:
+		{
+			HI_UNF_DMX_TSBUF_STATUS_S pStatus;
+
+			if (HI_UNF_DMX_GetTSBufferStatus(player->hTsBuffer, &pStatus) == HI_SUCCESS)
+			{
+				if (pStatus.u32UsedSize <= 256)
+					*reventsp = POLLIN;
+			}
+			else
+				*reventsp = POLLIN;
+
+			pthread_mutex_unlock(&player->m_poll);
+			return 0;
+		}
+		break;
 	}
 
 	if (ph && !(*reventsp & POLLOUT))
@@ -1620,13 +1607,13 @@ int player_write(int dev_type, const char *buf, size_t size)
 			c_s = AUDIO_STREAM_S;
 			c_e = AUDIO_STREAM_E;
 			bID = HI_UNF_AVPLAY_BUF_ID_ES_AUD;
-			pts = &player->m_audio_pts;
+			pts = &player->AudioPts;
 		break;
 		case DEV_VIDEO:
 			c_s = VIDEO_STREAM_S;
 			c_e = VIDEO_STREAM_E;
 			bID = HI_UNF_AVPLAY_BUF_ID_ES_VID;
-			pts = &player->m_video_pts;
+			pts = &player->VideoPts;
 		break;
 		case DEV_DVR:
 		{

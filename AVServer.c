@@ -525,8 +525,10 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 			return player->poll(DEV_AUDIO, ph, reventsp, false);
 		break;
 		case DVB_VIDEO_DEV:
-		case DVB_DVR_DEV:
 			return player->poll(DEV_VIDEO, ph, reventsp, dvb_hisi_open_mask & (1 << type));
+		break;
+		case DVB_DVR_DEV:
+			return player->poll(DEV_DVR, ph, reventsp, dvb_hisi_open_mask & (1 << type));
 		break;
 		default:
 			*reventsp = -EINVAL;

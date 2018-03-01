@@ -71,12 +71,10 @@ struct s_player {
 	bool IsCreated;
 	int PlayerMode;		/* 0 demux, 1 memory */
 	int AudioPid;		/* unknown pid */
-	long long AudioPts;
 	int AudioType;
 	int AudioChannel;	/* 0 stereo, 1 left, 2 right */
 	int AudioState;		/* 0 stoped, 1 playing, 2 paused */
 	int VideoPid;		/* unknown pid */
-	long long VideoPts;
 	int VideoType;
 	int VideoState;		/* 0 stoped, 1 playing, 2 freezed */
 	int VideoFormat;	/* 0 4:3, 1 16:9, 2 2.21:1 */
@@ -105,6 +103,13 @@ struct s_player {
 		unsigned int framerate;
 		bool progressive;
 	} events[3];
+
+	struct {
+		char header[256];
+		size_t size;
+		size_t es_size;
+		long long pts;
+	} p2e[2];
 
 	pthread_mutex_t m_apts;
 	pthread_mutex_t m_vpts;
@@ -484,12 +489,10 @@ bool player_create(void)
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
 	player->AudioPid		= 0x1FFFF;
-	player->AudioPts		= HI_INVALID_PTS;
 	player->AudioType		= HA_AUDIO_ID_AAC;
 	player->AudioChannel	= 0;
 	player->AudioState		= 0;
 	player->VideoPid		= 0x1FFFF;
-	player->VideoPts		= HI_INVALID_PTS;
 	player->VideoType		= HI_UNF_VCODEC_TYPE_MPEG2;
 	player->VideoState		= 0;
 	player->VideoFormat		= 1;
@@ -1584,11 +1587,11 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 int player_write(int dev_type, const char *buf, size_t size)
 {
 	bool IsHeader;
-	long long *pts;
 	unsigned char c_s;
 	unsigned char c_e;
 	HI_UNF_STREAM_BUF_S sBuf;
 	HI_UNF_AVPLAY_BUFID_E bID;
+	size_t pSize = size;
 	unsigned char h = buf[0];
 	unsigned char e = buf[1];
 	unsigned char a = buf[2];
@@ -1607,13 +1610,11 @@ int player_write(int dev_type, const char *buf, size_t size)
 			c_s = AUDIO_STREAM_S;
 			c_e = AUDIO_STREAM_E;
 			bID = HI_UNF_AVPLAY_BUF_ID_ES_AUD;
-			pts = &player->AudioPts;
 		break;
 		case DEV_VIDEO:
 			c_s = VIDEO_STREAM_S;
 			c_e = VIDEO_STREAM_E;
 			bID = HI_UNF_AVPLAY_BUF_ID_ES_VID;
-			pts = &player->VideoPts;
 		break;
 		case DEV_DVR:
 		{
@@ -1697,6 +1698,10 @@ int player_write(int dev_type, const char *buf, size_t size)
 	/* Extract PTS from header. */
 	if (IsHeader)
 	{
+		/* Save header for use when receive data. */
+		memcpy(&player->p2e[dev_type].header, buf, size);
+		player->p2e[dev_type].size = size;
+
 		if ((buf[7] & 0x80) >> 7) /* PTS */
 		{
 			HI_U32 PTSLow = 0;
@@ -1708,31 +1713,69 @@ int player_write(int dev_type, const char *buf, size_t size)
 					| (((buf[13] & 0xfe)) >> 1);
 
 			if (buf[9] & 0x08)
-				*pts = (PTSLow / 90) + 0x2D82D82; //(1 << 32) / 90;
+				player->p2e[dev_type].pts = (PTSLow / 90) + 0x2D82D82; //(1 << 32) / 90;
 			else
-				*pts = (PTSLow / 90);
+				player->p2e[dev_type].pts = (PTSLow / 90);
 		}
+		else
+			player->p2e[dev_type].pts = 0;
+
+		/* Check ES size in PES package.
+		 * ES Size = (PES Size - PES Header Size)
+		 *
+		 * Sometimes the Header contains ES data too.
+		 * And because of this, is necessary save header for check in next step.
+		 */
+		player->p2e[dev_type].es_size = (((buf[4]<<8) | buf[5]) + 6) - (9 + buf[8]);
+		if (player->p2e[dev_type].es_size < 0)
+			player->p2e[dev_type].es_size = 0; /* The ES size is big, and not have data in header. */
 
 		/* Not need write Header for Audio. */
 		if (dev_type == DEV_AUDIO)
 			return size;
 	}
+	else if (dev_type == DEV_AUDIO)
+	{
+		if (size < player->p2e[dev_type].es_size && player->p2e[dev_type].size > 0)
+		{
+			IsHeader = true;
+			pSize = player->p2e[dev_type].es_size;
+		}
+	}
 
 	pthread_mutex_lock(&player->m_write);
-	if (HI_UNF_AVPLAY_GetBuf(player->hPlayer, bID, size, &sBuf, 0) != HI_SUCCESS)
+	if (HI_UNF_AVPLAY_GetBuf(player->hPlayer, bID, pSize, &sBuf, 0) != HI_SUCCESS)
 	{
 		pthread_mutex_unlock(&player->m_write);
 		usleep(1000);
 		return 0;
 	}
 
-	memcpy(sBuf.pu8Data, buf, size);
-	if (HI_UNF_AVPLAY_PutBuf(player->hPlayer, bID, size, *pts) != HI_SUCCESS)
+	if (dev_type == DEV_AUDIO && IsHeader)
+	{
+		/** ((Header + Data) - ES) = Get the init position of ES Data **/
+		size_t start= (player->p2e[dev_type].size + size) - player->p2e[dev_type].es_size;
+		/** Header - start = Get the ES Data Size in Header **/
+		size_t length = player->p2e[dev_type].size - start;
+
+		memcpy(sBuf.pu8Data, &player->p2e[dev_type].header[start], length);
+		memcpy(&sBuf.pu8Data[length], buf, size);
+	}
+	else
+		memcpy(sBuf.pu8Data, buf, size);
+
+	if (HI_UNF_AVPLAY_PutBuf(player->hPlayer, bID, pSize, player->p2e[dev_type].pts) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
 		pthread_mutex_unlock(&player->m_write);
 		usleep(1000);
 		return 0;
+	}
+
+	if (dev_type == DEV_AUDIO && IsHeader)
+	{
+		player->p2e[dev_type].size    = 0;
+		player->p2e[dev_type].es_size = 0;
 	}
 	pthread_mutex_unlock(&player->m_write);
 

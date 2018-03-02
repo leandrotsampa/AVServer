@@ -1698,10 +1698,6 @@ int player_write(int dev_type, const char *buf, size_t size)
 	/* Extract PTS from header. */
 	if (IsHeader)
 	{
-		/* Save header for use when receive data. */
-		memcpy(&player->p2e[dev_type].header, buf, size);
-		player->p2e[dev_type].size = size;
-
 		if ((buf[7] & 0x80) >> 7) /* PTS */
 		{
 			HI_U32 PTSLow = 0;
@@ -1720,19 +1716,25 @@ int player_write(int dev_type, const char *buf, size_t size)
 		else
 			player->p2e[dev_type].pts = 0;
 
-		/* Check ES size in PES package.
-		 * ES Size = (PES Size - PES Header Size)
-		 *
-		 * Sometimes the Header contains ES data too.
-		 * And because of this, is necessary save header for check in next step.
-		 */
-		player->p2e[dev_type].es_size = (((buf[4]<<8) | buf[5]) + 6) - (9 + buf[8]);
-		if (player->p2e[dev_type].es_size < 0)
-			player->p2e[dev_type].es_size = 0; /* The ES size is big, and not have data in header. */
-
-		/* Not need write Header for Audio. */
+		/* Not need write Header for Audio but need keep for now. */
 		if (dev_type == DEV_AUDIO)
+		{
+			/* Check ES size in PES package.
+			 * ES Size = (PES Size - PES Header Size)
+			 *
+			 * Sometimes the Header contains ES data too.
+			 * And because of this, is necessary save header for check in next step.
+			 */
+			player->p2e[dev_type].es_size = (((buf[4]<<8) | buf[5]) + 6) - (9 + buf[8]);
+			if (player->p2e[dev_type].es_size < 0)
+				player->p2e[dev_type].es_size = 0; /* The ES size is big, and not have data in header. */
+
+			/* Save header for use when receive data. */
+			memcpy(&player->p2e[dev_type].header, buf, size);
+			player->p2e[dev_type].size = size;
+
 			return size;
+		}
 	}
 	else if (dev_type == DEV_AUDIO)
 	{
@@ -1795,12 +1797,12 @@ struct class_ops *player_get_ops(void)
 	player_ops.set_format		= player_set_format;
 	player_ops.set_disp_format	= player_set_display_format;
 	player_ops.set_fastfoward	= player_set_fastfoward;
-    player_ops.play				= player_play;
+	player_ops.play				= player_play;
 	player_ops.pause			= player_pause;
 	player_ops.resume			= player_resume;
 	player_ops.stop				= player_stop;
 	player_ops.mute				= player_mute;
-    player_ops.sync				= player_sync;
+	player_ops.sync				= player_sync;
 	player_ops.channel			= player_channel;
 	player_ops.status			= player_get_status;
 	player_ops.get_event		= player_get_event;

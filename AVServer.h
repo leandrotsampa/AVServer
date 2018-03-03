@@ -29,8 +29,8 @@ enum {
 
 /* Class Operations */
 struct class_ops {
-    bool (*create)(void);
-    void (*destroy)(void);
+	bool (*create)(void);
+	void (*destroy)(void);
 
 	/** Call's for Player **/
 	bool (*clear)(int);
@@ -42,12 +42,13 @@ struct class_ops {
 	bool (*set_format)(int);
 	bool (*set_disp_format)(int);
 	bool (*set_fastfoward)(int);
-    bool (*play)(int);
+	bool (*set_slowmotion)(int);
+	bool (*play)(int);
 	bool (*pause)(int);
 	bool (*resume)(int);
 	bool (*stop)(int);
 	bool (*mute)(bool);
-    bool (*sync)(bool);
+	bool (*sync)(bool);
 	bool (*channel)(int);
 	bool (*status)(int, void *);
 	bool (*get_event)(struct video_event *);

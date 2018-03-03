@@ -471,6 +471,8 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		break;
 		case VIDEO_SLOWMOTION:
 			printf("%s: VIDEO_SLOWMOTION - %d\n", __FUNCTION__, (int)(intptr_t)arg);
+
+			return player->set_slowmotion((int)(intptr_t)arg) - 1;
 		break;
 		case VIDEO_GET_CAPABILITIES:
 			printf("%s: VIDEO_GET_CAPABILITIES\n", __FUNCTION__);

@@ -82,6 +82,7 @@ struct s_player {
 
 	bool IsPES;
 	bool IsDVR;
+	bool IsTimeShift;
 	bool IsBlank;
 	bool IsStopThread;
 	bool IsSyncEnabled;
@@ -1003,6 +1004,25 @@ bool player_set_fastfoward(int speed)
 	return true;
 }
 
+bool player_set_slowmotion(int speed)
+{
+	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, speed);
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	if (speed == 11)
+		player->IsTimeShift = true;
+	else if (speed == 10)
+		player->IsTimeShift = false;
+
+	return true;
+}
+
 bool player_play(int dev_type)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, dev_type);
@@ -1074,10 +1094,8 @@ bool player_pause(int dev_type)
 	{
 		case DEV_AUDIO:
 		{
-			if (player->AudioState == 2)
+			if (player->AudioState == 0)
 				return true;
-			else if (player->AudioState == 0)
-				return false;
 
 			pthread_mutex_lock(&player->m_write);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
@@ -1094,10 +1112,8 @@ bool player_pause(int dev_type)
 		}
 		break;
 		case DEV_VIDEO:
-			if (player->VideoState == 2)
+			if (player->VideoState == 0)
 				return true;
-			else if (player->VideoState == 0)
-				return false;
 
 			pthread_mutex_lock(&player->m_write);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
@@ -1213,7 +1229,7 @@ bool player_stop(int dev_type)
 				return true;
 
 			stStop.u32TimeoutMs = 0;
-			stStop.enMode = player->IsBlank ? HI_UNF_AVPLAY_STOP_MODE_BLACK : HI_UNF_AVPLAY_STOP_MODE_STILL;
+			stStop.enMode = (player->IsBlank && !player->IsTimeShift) ? HI_UNF_AVPLAY_STOP_MODE_BLACK : HI_UNF_AVPLAY_STOP_MODE_STILL;
 
 			if (HI_UNF_AVPLAY_Stop(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &stStop) != HI_SUCCESS)
 			{
@@ -1557,11 +1573,9 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 
 			if (HI_UNF_DMX_GetTSBufferStatus(player->hTsBuffer, &pStatus) == HI_SUCCESS)
 			{
-				if (pStatus.u32UsedSize <= 256)
+				if (pStatus.u32UsedSize <= 256 && !player->IsTimeShift)
 					*reventsp = POLLIN;
 			}
-			else
-				*reventsp = POLLIN;
 
 			pthread_mutex_unlock(&player->m_poll);
 			return 0;
@@ -1797,6 +1811,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.set_format		= player_set_format;
 	player_ops.set_disp_format	= player_set_display_format;
 	player_ops.set_fastfoward	= player_set_fastfoward;
+	player_ops.set_slowmotion	= player_set_slowmotion;
 	player_ops.play				= player_play;
 	player_ops.pause			= player_pause;
 	player_ops.resume			= player_resume;

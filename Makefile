@@ -7,6 +7,9 @@ OUT = AVServer
 
 default: $(OUT)
 
+strip: $(OUT)
+	$(CROSS_COMPILER)strip --strip-all $(OUT)
+
 $(OUT): clean
 	$(CC) -Wall -D_FILE_OFFSET_BITS=64 $(INCLUDES) $(LIBS) -o $(OUT) $(filter-out test_av.c, $(wildcard *.c))
 

@@ -159,8 +159,6 @@ void player_create_painel(void)
 void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
 {
 	int i;
-	HI_HANDLE hPKey;
-	HI_UNF_DMX_GetDescramblerKeyHandle(hPChannel, &hPKey);
 
 	for (i = 0; i < MAX_ADAPTER; i++)
 	{
@@ -172,11 +170,15 @@ void player_set_keyhandler(HI_HANDLE hPChannel, int pid)
 
 			if (HI_UNF_DMX_GetDescramblerKeyHandle(hChannel, &hKey) == HI_SUCCESS)
 			{
-				if (hPKey && hPKey != hKey)
-					HI_UNF_DMX_DetachDescrambler(hPKey, hPChannel);
+				HI_HANDLE hPKey;
+
+				if (HI_UNF_DMX_GetDescramblerKeyHandle(hPChannel, &hPKey) == HI_SUCCESS)
+					if (hPKey != hKey)
+						if (HI_UNF_DMX_DetachDescrambler(hPKey, hPChannel) != HI_SUCCESS)
+							printf("[ERROR] %s: Failed to detach KeyHandle from Player.\n", __FUNCTION__);
 
 				if (HI_UNF_DMX_AttachDescrambler(hKey, hPChannel) != HI_SUCCESS)
-					printf("[ERROR] %s -> Failed to attach KeyHandle to PID %d.\n", __FUNCTION__, pid);
+					printf("[ERROR] %s: Failed to attach KeyHandle to PID %d.\n", __FUNCTION__, pid);
 			}
 
 			break;

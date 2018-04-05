@@ -55,15 +55,15 @@ static pthread_mutex_t m_pwrite;
 
 static int dvb_hisi_file_type(const char *path)
 {
-	if (strcmp(path, "/") == 0)
+	if (strEquals(strdup(path), "/", false))
 		return DVB_ROOT;
-	else if (strcmp(path, "/" AUDIO_DEV) == 0)
+	else if (strEquals(strdup(path), "/" AUDIO_DEV, false))
 		return DVB_AUDIO_DEV;
-	else if (strcmp(path, "/" VIDEO_DEV) == 0)
+	else if (strEquals(strdup(path), "/" VIDEO_DEV, false))
 		return DVB_VIDEO_DEV;
-	else if (strncmp(path, "/" DVR_DEV, 4) == 0)
+	else if (strEquals(strdup(path), "/" DVR_DEV, true))
 		return DVB_DVR_DEV;
-	else if (strcmp(path, "/" PAINEL_DEV) == 0)
+	else if (strEquals(strdup(path), "/" PAINEL_DEV, false))
 		return DVB_PAINEL_DEV;
 
 	return DVB_NONE;
@@ -566,7 +566,7 @@ int main(int argc, char *argv[])
 	printf("# Contact:                          #\n");
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
-	printf("# 	1.5                         #\n");
+	printf("# 	1.9                         #\n");
 	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	pthread_mutex_init(&m_pwrite, NULL);

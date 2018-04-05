@@ -377,11 +377,11 @@ bool player_create(void)
 
 		while (file)
 		{
-			if (strncmp(file->d_name, "libHA.AUDIO.", 12) == 0)
+			if (startsWith(file->d_name, "libHA.AUDIO.") && endsWith(file->d_name, "decode.so"))
 				if (HI_UNF_AVPLAY_RegisterAcodecLib(file->d_name) != HI_SUCCESS)
 					printf("[ERROR] %s: Failed to Register Audio library %s\n", __FUNCTION__, file->d_name);
 
-			if (strncmp(file->d_name, "libHV.VIDEO.", 12) == 0)
+			if (startsWith(file->d_name, "libHV.VIDEO.") && endsWith(file->d_name, "decode.so"))
 				if (HI_UNF_AVPLAY_RegisterVcodecLib(file->d_name) != HI_SUCCESS)
 					printf("[ERROR] %s: Failed to Register Video library %s\n", __FUNCTION__, file->d_name);
 
@@ -711,9 +711,9 @@ bool player_set_type(int dev_type, int type)
 				fgets(s_mode, 12, file);
 				fclose(file);
 
-				if (strcmp(s_mode, "downmix") == 0)
+				if (strEquals(s_mode, "downmix", false))
 					h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
-				else if (strcmp(s_mode, "passthrough") == 0)
+				else if (strEquals(s_mode, "passthrough", false))
 					h_mode = HI_UNF_SND_HDMI_MODE_RAW;
 			}
 			if (HI_UNF_SND_SetHdmiMode(HI_UNF_SND_0, HI_UNF_SND_OUTPUTPORT_HDMI0, h_mode) != HI_SUCCESS)
@@ -1662,7 +1662,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 		break;
 		case DEV_PAINEL:
 		{
-			if (strncmp(buf, "TIME", 4) == HI_SUCCESS)
+			if (strEquals(strdup(buf), "TIME", true))
 				player_showtime();
 			else
 			{

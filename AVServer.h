@@ -7,10 +7,8 @@
 
 #include <fuse.h>
 #include <poll.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <string_ext.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <sys/types.h>

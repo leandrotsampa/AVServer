@@ -339,7 +339,7 @@ bool player_create(void)
 		goto SYS_DEINIT;
 	}
 
-	if (HIADP_Disp_Init(HI_UNF_ENC_FMT_720P_50) != HI_SUCCESS)
+	if (HIADP_Disp_Init(HI_UNF_ENC_FMT_720P_60) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HIADP_Disp_Init failed.\n", __FUNCTION__);
 		goto SND_DEINIT;

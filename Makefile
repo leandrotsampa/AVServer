@@ -1,17 +1,34 @@
-CC = $(CROSS_COMPILER)gcc
-INCLUDES = -I. -Iinclude
-LIBS = -Llib -L../lib/.libs \
-	   -lc -lpthread -lrt -lstdc++ -ldl -lfuse3 -ljpeg6b -lhi_common -lhi_sample_common \
-	   -lpng -lhigo -lhigoadp -lhi_msp -lhi_resampler -lz -lfreetype -lhi_subtitle -lhi_so -lhi_ttx -lhi_cc
-OUT = AVServer
+#===============================================================================
+# export variable
+#===============================================================================
+ifeq ($(CFG_HI_EXPORT_FLAG),)
+SDK_DIR := $(shell cd $(CURDIR)/../.. && /bin/pwd)
+include $(SDK_DIR)/base.mak
+endif
 
-default: $(OUT)
+include $(SAMPLE_DIR)/base.mak
 
-strip: $(OUT)
-	$(CROSS_COMPILER)strip --strip-all $(OUT)
+#===============================================================================
+# local variable
+#===============================================================================
+AVSERVER_DIR := $(shell pwd)
 
-$(OUT): clean
-	$(CC) -Wall -D_FILE_OFFSET_BITS=64 $(INCLUDES) $(LIBS) -o $(OUT) $(filter-out test_av.c, $(wildcard *.c))
+CFLAGS += -D_GNU_SOURCE -D_XOPEN_SOURCE=600
+CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64
 
-clean:
-	rm -f $(OUT)
+CFLAGS += -I$(HI_INCLUDE_DIR) \
+          -I$(MSP_DIR)/include \
+		  -I$(MSP_DIR)/api/include \
+		  -I$(MSP_DIR)/drv/include \
+          -I$(SAMPLE_DIR)/common \
+          -I$(AVSERVER_DIR)/include \
+          -I$(AVSERVER_DIR)
+
+SAMPLE_IMAGES := AVServer
+
+LOCAL_OBJS := AVServer.o player.o $(COMMON_SRCS:%.c=%.o)
+
+DEPEND_LIBS := $(HI_LIBS)
+DEPEND_LIBS += -L$(AVSERVER_DIR)/lib/$(CFG_HI_ARM_TOOLCHAINS_NAME) -lfuse3
+
+include $(SAMPLE_DIR)/hi_sample_rules.mak

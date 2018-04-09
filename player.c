@@ -91,7 +91,13 @@ struct s_player {
 	int AudioBufferState;
 	int VideoBufferState;
 	unsigned poll_status;
-	struct fuse_pollhandle *poll_handle[2];
+
+	unsigned int hPlayer;
+	unsigned int hWindow;
+	unsigned int hTrack;
+	unsigned int hTsBuffer;
+	unsigned int hVdec;
+	unsigned int hSync;
 
 	unsigned event_status;
 	struct {
@@ -118,12 +124,7 @@ struct s_player {
 	pthread_mutex_t m_poll;
 	pthread_mutex_t m_write;
 
-	unsigned int hPlayer;
-	unsigned int hWindow;
-	unsigned int hTrack;
-	unsigned int hTsBuffer;
-	unsigned int hVdec;
-	unsigned int hSync;
+	struct fuse_pollhandle *poll_handle[2];
 };
 
 void player_showtime(void)

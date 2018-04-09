@@ -18,8 +18,8 @@ CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64
 
 CFLAGS += -I$(HI_INCLUDE_DIR) \
           -I$(MSP_DIR)/include \
-		  -I$(MSP_DIR)/api/include \
-		  -I$(MSP_DIR)/drv/include \
+          -I$(MSP_DIR)/api/include \
+          -I$(MSP_DIR)/drv/include \
           -I$(SAMPLE_DIR)/common \
           -I$(AVSERVER_DIR)/include \
           -I$(AVSERVER_DIR)

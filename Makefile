@@ -24,9 +24,9 @@ CFLAGS += -I$(HI_INCLUDE_DIR) \
           -I$(AVSERVER_DIR)/include \
           -I$(AVSERVER_DIR)
 
-SAMPLE_IMAGES := AVServer
+SAMPLE_IMAGES := AVServer test_av
 
-LOCAL_OBJS := AVServer.o player.o string_ext.o $(COMMON_SRCS:%.c=%.o)
+LOCAL_OBJS := player.o string_ext.o $(COMMON_SRCS:%.c=%.o)
 
 DEPEND_LIBS := $(HI_LIBS)
 DEPEND_LIBS += -L$(AVSERVER_DIR)/lib/$(CFG_HI_ARM_TOOLCHAINS_NAME) -lfuse3

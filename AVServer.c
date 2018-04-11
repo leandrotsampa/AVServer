@@ -38,6 +38,8 @@
 #define DVR_DEV		"dvr"
 #define PAINEL_DEV	"panel"
 
+static unsigned dvb_hisi_open_mask;
+
 enum {
 	DVB_NONE,
 	DVB_ROOT,
@@ -47,11 +49,6 @@ enum {
 	DVB_DVR_DEV,
 	DVB_PAINEL_DEV,
 };
-
-static unsigned dvb_hisi_open_mask;
-
-/* Mutex for Player */
-static pthread_mutex_t m_pwrite;
 
 static int dvb_hisi_file_type(const char *path)
 {
@@ -249,7 +246,6 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	else if (type == DVB_PAINEL_DEV)
 		return player->write(DEV_PAINEL, buf, size);
 
-	pthread_mutex_lock(&m_pwrite);
 	switch (type)
 	{
 		case DVB_AUDIO_DEV:
@@ -264,7 +260,6 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 				write(fi->fh, buf, ret);
 		break;
 	}
-	pthread_mutex_unlock(&m_pwrite);
 
 	return ret;
 }
@@ -389,8 +384,10 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 			printf("%s: AUDIO_SET_ID\n", __FUNCTION__);
 		break;
 		case AUDIO_SET_MIXER:
-			printf("%s: AUDIO_SET_MIXER\n", __FUNCTION__);
-			//struct audio_mixer *amix = (struct audio_mixer *)parg;
+		{
+			struct audio_mixer *amix = (struct audio_mixer *)data;
+			printf("%s: AUDIO_SET_MIXER - VL(%d)/VR(%d)\n", __FUNCTION__, amix->volume_left, amix->volume_right);
+		}
 		break;
 		case AUDIO_SET_STREAMTYPE:
 			printf("%s: AUDIO_SET_STREAMTYPE\n", __FUNCTION__);
@@ -568,8 +565,6 @@ int main(int argc, char *argv[])
 	printf("# Current Version:                  #\n");
 	printf("# 	1.9                         #\n");
 	printf("\e[4m#___________________________________#\e[24m\n\n");
-
-	pthread_mutex_init(&m_pwrite, NULL);
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);
 }

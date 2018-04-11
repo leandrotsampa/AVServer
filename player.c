@@ -65,7 +65,7 @@
 #define MAX_ADAPTER	4
 #define PLAYER_DEMUX_PORT 4
 
-struct class_ops player_ops;
+static struct class_ops player_ops;
 
 struct s_player {
 	bool IsCreated;
@@ -90,7 +90,6 @@ struct s_player {
 
 	int AudioBufferState;
 	int VideoBufferState;
-	unsigned poll_status;
 
 	unsigned int hPlayer;
 	unsigned int hWindow;
@@ -99,7 +98,15 @@ struct s_player {
 	unsigned int hVdec;
 	unsigned int hSync;
 
+	unsigned poll_status;
 	unsigned event_status;
+
+	pthread_mutex_t m_apts;
+	pthread_mutex_t m_vpts;
+	pthread_mutex_t m_event;
+	pthread_mutex_t m_poll;
+	pthread_rwlock_t m_write;
+
 	struct {
 		bool active;
 
@@ -117,12 +124,6 @@ struct s_player {
 		size_t es_size;
 		long long pts;
 	} p2e[2];
-
-	pthread_mutex_t m_apts;
-	pthread_mutex_t m_vpts;
-	pthread_mutex_t m_event;
-	pthread_mutex_t m_poll;
-	pthread_mutex_t m_write;
 
 	struct fuse_pollhandle *poll_handle[2];
 };
@@ -484,11 +485,11 @@ bool player_create(void)
 	player->events[1].type = VIDEO_EVENT_FRAME_RATE_CHANGED;
 	player->events[2].type = 16; /* VIDEO_EVENT_PROGRESSIVE_CHANGED */
 	player->event_status = 0;
-	pthread_mutex_init(&player->m_apts, NULL);
-	pthread_mutex_init(&player->m_vpts, NULL);
-	pthread_mutex_init(&player->m_event, NULL);
-	pthread_mutex_init(&player->m_poll, NULL);
-	pthread_mutex_init(&player->m_write, NULL);
+	pthread_mutex_init(&player->m_apts,   0);
+	pthread_mutex_init(&player->m_vpts,   0);
+	pthread_mutex_init(&player->m_event,  0);
+	pthread_mutex_init(&player->m_poll,   0);
+	pthread_rwlock_init(&player->m_write, 0);
 
 	player->IsCreated		= true;
 	player->PlayerMode		= 0;
@@ -602,7 +603,7 @@ bool player_clear(int dev_type)
 		return false;
 	}
 
-	pthread_mutex_lock(&player->m_write);
+	pthread_rwlock_rdlock(&player->m_write);
 	if (player->IsPES)
 		if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
 			printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
@@ -631,7 +632,7 @@ bool player_clear(int dev_type)
 		player->poll_status &= ~(1 << dev_type);
 	}
 	pthread_mutex_unlock(&player->m_poll);
-	pthread_mutex_unlock(&player->m_write);
+	pthread_rwlock_unlock(&player->m_write);
 
 	return true;
 }
@@ -978,7 +979,7 @@ bool player_set_fastfoward(int speed)
 		return false;
 	}
 
-	/*pthread_mutex_lock(&player->m_write);
+	/*pthread_rwlock_rdlock(&player->m_write);
 	if (speed == 0)
 	{
 		if (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
@@ -986,7 +987,7 @@ bool player_set_fastfoward(int speed)
 		if (HI_UNF_AVPLAY_Resume(player->hPlayer, HI_NULL) != HI_SUCCESS)
 			printf("[ERROR] %s: Failed to resume from FF.", __FUNCTION__);
 
-		pthread_mutex_unlock(&player->m_write);
+		pthread_rwlock_unlock(&player->m_write);
 		return true;
 	}
 
@@ -999,11 +1000,11 @@ bool player_set_fastfoward(int speed)
 	if (HI_UNF_AVPLAY_Tplay(player->hPlayer, &stTplayOpts) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s: Failed to set speed to %d.\n", __FUNCTION__, speed);
-		pthread_mutex_unlock(&player->m_write);
+		pthread_rwlock_unlock(&player->m_write);
 		return false;
 	}
 
-	pthread_mutex_unlock(&player->m_write);*/
+	pthread_rwlock_unlock(&player->m_write);*/
 	return true;
 }
 
@@ -1100,38 +1101,38 @@ bool player_pause(int dev_type)
 			if (player->AudioState == 0)
 				return true;
 
-			pthread_mutex_lock(&player->m_write);
+			pthread_rwlock_rdlock(&player->m_write);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to stop sync Audio.\n", __FUNCTION__);
 			if (HI_MPI_AO_Track_Pause(player->hTrack) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to pause Audio.\n", __FUNCTION__);
-				pthread_mutex_unlock(&player->m_write);
+				pthread_rwlock_unlock(&player->m_write);
 				return false;
 			}
 
 			player->AudioState = 2;
-			pthread_mutex_unlock(&player->m_write);
+			pthread_rwlock_unlock(&player->m_write);
 		}
 		break;
 		case DEV_VIDEO:
 			if (player->VideoState == 0)
 				return true;
 
-			pthread_mutex_lock(&player->m_write);
+			pthread_rwlock_rdlock(&player->m_write);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to stop sync Video.\n", __FUNCTION__);
 			if (HI_MPI_WIN_Pause(player->hWindow, HI_TRUE) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to pause Video.\n", __FUNCTION__);
-				pthread_mutex_unlock(&player->m_write);
+				pthread_rwlock_unlock(&player->m_write);
 				return false;
 			}
 			if (HI_MPI_WIN_Freeze(player->hWindow, HI_TRUE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to freeze Video.\n", __FUNCTION__);
 
 			player->VideoState = 2;
-			pthread_mutex_unlock(&player->m_write);
+			pthread_rwlock_unlock(&player->m_write);
 		break;
 	}
 
@@ -1160,18 +1161,18 @@ bool player_resume(int dev_type)
 			else if (player->AudioState == 0)
 				return false;
 
-			pthread_mutex_lock(&player->m_write);
+			pthread_rwlock_rdlock(&player->m_write);
 			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to start sync Audio.\n", __FUNCTION__);
 			if (HI_MPI_AO_Track_Resume(player->hTrack) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to resume Audio.\n", __FUNCTION__);
-				pthread_mutex_unlock(&player->m_write);
+				pthread_rwlock_unlock(&player->m_write);
 				return false;
 			}
 
 			player->AudioState = 1;
-			pthread_mutex_unlock(&player->m_write);
+			pthread_rwlock_unlock(&player->m_write);
 		}
 		break;
 		case DEV_VIDEO:
@@ -1180,7 +1181,7 @@ bool player_resume(int dev_type)
 			else if (player->VideoState == 0)
 				return false;
 
-			pthread_mutex_lock(&player->m_write);
+			pthread_rwlock_rdlock(&player->m_write);
 			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to start sync Video.\n", __FUNCTION__);
 			if (HI_MPI_WIN_Freeze(player->hWindow, HI_FALSE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
@@ -1188,12 +1189,12 @@ bool player_resume(int dev_type)
 			if (HI_MPI_WIN_Pause(player->hWindow, HI_FALSE) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to resume Video.\n", __FUNCTION__);
-				pthread_mutex_unlock(&player->m_write);
+				pthread_rwlock_unlock(&player->m_write);
 				return false;
 			}
 
 			player->VideoState = 1;
-			pthread_mutex_unlock(&player->m_write);
+			pthread_rwlock_unlock(&player->m_write);
 		break;
 	}
 
@@ -1645,18 +1646,18 @@ int player_write(int dev_type, const char *buf, size_t size)
 				return -EAGAIN;
 			}
 
-			pthread_mutex_lock(&player->m_write);
+			pthread_rwlock_wrlock(&player->m_write);
 			if (HI_UNF_DMX_GetTSBuffer(player->hTsBuffer, size, &sBuf, 1000) == HI_SUCCESS)
 			{
 				memcpy(sBuf.pu8Data, buf, size);
 				if (HI_UNF_DMX_PutTSBuffer(player->hTsBuffer, size) != HI_SUCCESS)
 				{
 					printf("[ERROR] %s: Failed to put buffer.\n", __FUNCTION__);
-					pthread_mutex_unlock(&player->m_write);
+					pthread_rwlock_unlock(&player->m_write);
 					return -EAGAIN;
 				}
 			}
-			pthread_mutex_unlock(&player->m_write);
+			pthread_rwlock_unlock(&player->m_write);
 
 			return size;
 		}
@@ -1762,11 +1763,11 @@ int player_write(int dev_type, const char *buf, size_t size)
 		}
 	}
 
-	pthread_mutex_lock(&player->m_write);
+	pthread_rwlock_wrlock(&player->m_write);
 	if (HI_UNF_AVPLAY_GetBuf(player->hPlayer, bID, pSize, &sBuf, 0) != HI_SUCCESS)
 	{
-		pthread_mutex_unlock(&player->m_write);
 		usleep(1000);
+		pthread_rwlock_unlock(&player->m_write);
 		return 0;
 	}
 
@@ -1786,8 +1787,8 @@ int player_write(int dev_type, const char *buf, size_t size)
 	if (HI_UNF_AVPLAY_PutBuf(player->hPlayer, bID, pSize, player->p2e[dev_type].pts) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s: Failed to put buffer for device type %d.\n", __FUNCTION__, dev_type);
-		pthread_mutex_unlock(&player->m_write);
 		usleep(1000);
+		pthread_rwlock_unlock(&player->m_write);
 		return 0;
 	}
 
@@ -1796,7 +1797,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 		player->p2e[dev_type].size    = 0;
 		player->p2e[dev_type].es_size = 0;
 	}
-	pthread_mutex_unlock(&player->m_write);
+	pthread_rwlock_unlock(&player->m_write);
 
 	return size;
 }

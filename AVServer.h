@@ -46,6 +46,7 @@ struct class_ops {
 	bool (*resume)(int);
 	bool (*stop)(int);
 	bool (*mute)(bool);
+	bool (*mixer)(audio_mixer_t *);
 	bool (*sync)(bool);
 	bool (*channel)(int);
 	bool (*status)(int, void *);

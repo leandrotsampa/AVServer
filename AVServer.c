@@ -384,10 +384,9 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 			printf("%s: AUDIO_SET_ID\n", __FUNCTION__);
 		break;
 		case AUDIO_SET_MIXER:
-		{
-			struct audio_mixer *amix = (struct audio_mixer *)data;
-			printf("%s: AUDIO_SET_MIXER - VL(%d)/VR(%d)\n", __FUNCTION__, amix->volume_left, amix->volume_right);
-		}
+			printf("%s: AUDIO_SET_MIXER\n", __FUNCTION__);
+
+			return player->mixer((audio_mixer_t *)data) - 1;
 		break;
 		case AUDIO_SET_STREAMTYPE:
 			printf("%s: AUDIO_SET_STREAMTYPE\n", __FUNCTION__);

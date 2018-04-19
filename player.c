@@ -1271,6 +1271,31 @@ bool player_mute(bool mute)
 	return true;
 }
 
+bool player_mixer(audio_mixer_t *mixer)
+{
+	printf("[INFO] %s: Mixer - VL(%d)/VR(%d).\n", __FUNCTION__, mixer->volume_left, mixer->volume_right);
+	HI_UNF_SND_ABSGAIN_ATTR_S AbsWeightGain;
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	AbsWeightGain.bLinearMode = HI_TRUE;
+	AbsWeightGain.s32GainL = mixer->volume_left;
+	AbsWeightGain.s32GainR = mixer->volume_right;
+
+	if (HI_UNF_SND_SetTrackAbsWeight(player->hTrack, &AbsWeightGain) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s: Failed to set mixer.\n", __FUNCTION__);
+		return false;
+	}
+
+	return true;
+}
+
 bool player_sync(bool sync)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, sync);
@@ -1358,6 +1383,7 @@ bool player_get_status(int dev_type, void *data)
 	{
 		case DEV_AUDIO:
 		{
+			HI_UNF_SND_ABSGAIN_ATTR_S AbsWeightGain;
 			audio_status_t *status = (audio_status_t *)data;
 
 			if (!status)
@@ -1369,8 +1395,15 @@ bool player_get_status(int dev_type, void *data)
 			status->stream_source	= player->PlayerMode;
 			status->channel_select	= player->AudioChannel;
 			status->bypass_mode		= (player->AudioType != HA_AUDIO_ID_AAC && player->AudioType != 10);
-			//status->mixer_state;
-			printf("[WARNING] %s -> Mixer state not implemented.\n", __FUNCTION__);
+
+			if (HI_UNF_SND_GetTrackAbsWeight(player->hTrack, &AbsWeightGain) == HI_SUCCESS)
+			{
+				if (AbsWeightGain.bLinearMode == HI_TRUE)
+				{
+					status->mixer_state.volume_left = AbsWeightGain.s32GainL;
+					status->mixer_state.volume_right= AbsWeightGain.s32GainR;
+				}
+			}
 		}
 		break;
 		case DEV_VIDEO:
@@ -1821,6 +1854,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.resume			= player_resume;
 	player_ops.stop				= player_stop;
 	player_ops.mute				= player_mute;
+	player_ops.mixer			= player_mixer;
 	player_ops.sync				= player_sync;
 	player_ops.channel			= player_channel;
 	player_ops.status			= player_get_status;

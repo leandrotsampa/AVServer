@@ -26,13 +26,13 @@ CFLAGS += -I$(HI_INCLUDE_DIR) \
           -I$(MSP_DIR)/drv/include \
           -I$(SAMPLE_DIR)/common \
           -I$(SRC_DIR)/include \
+          -I$(SRC_DIR)/libfuse \
           -I$(SRC_DIR)
 
 SYS_LIBS := -lc -lpthread -lrt -lstdc++ -ldl
 HI_LIBS := -ljpeg -lhi_common -lpng -lhigo -lhigoadp -lhi_msp -lhi_resampler -lz -lfreetype -lhi_subtitle -lhi_so -lhi_ttx -lhi_cc
 
-HI_DEPEND_LIBS := -L$(SRC_DIR)/lib/$(CFG_HI_ARM_TOOLCHAINS_NAME) -L$(HI_SHARED_LIB_DIR)
-HI_DEPEND_LIBS += $(SYS_LIBS) $(HI_LIBS) -lfuse3
+HI_DEPEND_LIBS := -L$(HI_SHARED_LIB_DIR) $(SYS_LIBS) $(HI_LIBS)
 
 #===============================================================================
 # local variable
@@ -42,6 +42,24 @@ OUT := AVServer
 LOCAL_SRCS := AVServer.c \
               player.c \
 			  string_ext.c
+
+CFLAGS += -DFUSERMOUNT_DIR=\"/tmp\" -D_REENTRANT -DFUSE_USE_VERSION=31
+LIBFUSE_SRCS := libfuse/fuse.c \
+                libfuse/fuse_i.h \
+                libfuse/fuse_loop.c \
+                libfuse/fuse_loop_mt.c \
+                libfuse/fuse_lowlevel.c \
+                libfuse/fuse_misc.h \
+                libfuse/fuse_opt.c \
+                libfuse/fuse_signals.c \
+                libfuse/buffer.c \
+                libfuse/cuse_lowlevel.c \
+                libfuse/helper.c \
+                libfuse/mount.c \
+                libfuse/mount_util.c \
+                libfuse/mount_util.h \
+                libfuse/modules/subdir.c \
+                libfuse/modules/iconv.c
 
 COMMON_SRCS := $(SAMPLE_DIR)/common/hi_adp_demux.c \
                $(SAMPLE_DIR)/common/hi_adp_data.c \
@@ -67,7 +85,7 @@ strip: $(OUT)
 	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-strip --strip-all $(OUT)
 
 $(OUT): clean
-	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-gcc -Wall -D_FILE_OFFSET_BITS=64 $(CFLAGS) $(HI_DEPEND_LIBS) -o $(OUT) $(LOCAL_SRCS) $(COMMON_SRCS)
+	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-gcc -Wall -D_FILE_OFFSET_BITS=64 $(CFLAGS) $(HI_DEPEND_LIBS) -o $(OUT) $(LOCAL_SRCS) $(LIBFUSE_SRCS) $(COMMON_SRCS)
 
 clean:
 	@rm -f $(OUT)

@@ -14,12 +14,12 @@
  * Low level API
  *
  * IMPORTANT: you should define FUSE_USE_VERSION before including this
- * header.  To use the newest API define it to 30 (recommended for any
+ * header.  To use the newest API define it to 31 (recommended for any
  * new application).
  */
 
 #ifndef FUSE_USE_VERSION
-#define FUSE_USE_VERSION 30
+#error FUSE_USE_VERSION not defined
 #endif
 
 #include "fuse_common.h"
@@ -90,10 +90,16 @@ struct fuse_entry_param {
 	 */
 	struct stat attr;
 
-	/** Validity timeout (in seconds) for the attributes */
+	/** Validity timeout (in seconds) for inode attributes. If
+	    attributes only change as a result of requests that come
+	    through the kernel, this should be set to a very large
+	    value. */
 	double attr_timeout;
 
-	/** Validity timeout (in seconds) for the name */
+	/** Validity timeout (in seconds) for the name. If directory
+	    entries are changed/deleted only as a result of requests
+	    that come through the kernel, this should be set to a very
+	    large value. */
 	double entry_timeout;
 };
 
@@ -186,9 +192,11 @@ struct fuse_lowlevel_ops {
 	void (*init) (void *userdata, struct fuse_conn_info *conn);
 
 	/**
-	 * Clean up filesystem
+	 * Clean up filesystem.
 	 *
-	 * Called on filesystem exit
+	 * Called on filesystem exit. When this method is called, the
+	 * connection to the kernel may be gone already, so that eg. calls
+	 * to fuse_lowlevel_notify_* will fail.
 	 *
 	 * There's no reply to this function
 	 *
@@ -224,7 +232,7 @@ struct fuse_lowlevel_ops {
 	 * overwriting an existing file) rename. Filesystems must handle
 	 * such requests properly and it is recommended to defer removal
 	 * of the inode until the lookup count reaches zero. Calls to
-	 * unlink, remdir or rename will be followed closely by forget
+	 * unlink, rmdir or rename will be followed closely by forget
 	 * unless the file or directory is open, in which case the
 	 * kernel issues forget only after the release or releasedir
 	 * calls.
@@ -408,6 +416,13 @@ struct fuse_lowlevel_ops {
 	 * future bmap requests will fail with EINVAL without being
 	 * send to the filesystem process.
 	 *
+	 * *flags* may be `RENAME_EXCHANGE` or `RENAME_NOREPLACE`. If
+	 * RENAME_NOREPLACE is specified, the filesystem must not
+	 * overwrite *newname* if it exists and return an error
+	 * instead. If `RENAME_EXCHANGE` is specified, the filesystem
+	 * must atomically exchange the two files, i.e. both must
+	 * exist and neither may be deleted.
+	 *
 	 * Valid replies:
 	 *   fuse_reply_err
 	 *
@@ -439,14 +454,33 @@ struct fuse_lowlevel_ops {
 	/**
 	 * Open a file
 	 *
-	 * Open flags are available in fi->flags.  Creation (O_CREAT,
-	 * O_EXCL, O_NOCTTY) and by default also truncation (O_TRUNC)
-	 * flags will be filtered out. If an application specifies
-	 * O_TRUNC, fuse first calls truncate() and then open().
+	 * Open flags are available in fi->flags. The following rules
+	 * apply.
 	 *
-	 * If filesystem is able to handle O_TRUNC directly, the
-	 * init() handler should set the `FUSE_CAP_ATOMIC_O_TRUNC` bit
-	 * in ``conn->want``.
+	 *  - Creation (O_CREAT, O_EXCL, O_NOCTTY) flags will be
+	 *    filtered out / handled by the kernel.
+	 *
+	 *  - Access modes (O_RDONLY, O_WRONLY, O_RDWR) should be used
+	 *    by the filesystem to check if the operation is
+	 *    permitted.  If the ``-o default_permissions`` mount
+	 *    option is given, this check is already done by the
+	 *    kernel before calling open() and may thus be omitted by
+	 *    the filesystem.
+	 *
+	 *  - When writeback caching is enabled, the kernel may send
+	 *    read requests even for files opened with O_WRONLY. The
+	 *    filesystem should be prepared to handle this.
+	 *
+	 *  - When writeback caching is disabled, the filesystem is
+	 *    expected to properly handle the O_APPEND flag and ensure
+	 *    that each write is appending to the end of the file.
+	 * 
+         *  - When writeback caching is enabled, the kernel will
+	 *    handle O_APPEND. However, unless all changes to the file
+	 *    come through the kernel this will not work reliably. The
+	 *    filesystem should thus either ignore the O_APPEND flag
+	 *    (and let the kernel handle it), or return an error
+	 *    (indicating that reliably O_APPEND is not available).
 	 *
 	 * Filesystem may store an arbitrary file handle (pointer,
 	 * index, etc) in fi->fh, and use this in other all other file
@@ -849,16 +883,8 @@ struct fuse_lowlevel_ops {
 	 * If the file does not exist, first create it with the specified
 	 * mode, and then open it.
 	 *
-	 * Open flags (with the exception of O_NOCTTY) are available in
-	 * fi->flags.
-	 *
-	 * Filesystem may store an arbitrary file handle (pointer, index,
-	 * etc) in fi->fh, and use this in other all other file operations
-	 * (read, write, flush, release, fsync).
-	 *
-	 * There are also some flags (direct_io, keep_cache) which the
-	 * filesystem may set in fi, to change the way the file is opened.
-	 * See fuse_file_info structure in <fuse_common.h> for more details.
+	 * See the description of the open handler for more
+	 * information.
 	 *
 	 * If this method is not implemented or under Linux kernel
 	 * versions earlier than 2.6.15, the mknod() and open() methods
@@ -1395,9 +1421,12 @@ int fuse_reply_bmap(fuse_req_t req, uint64_t idx);
  * From the 'stbuf' argument the st_ino field and bits 12-15 of the
  * st_mode field are used.  The other fields are ignored.
  *
- * Note: offsets do not necessarily represent physical offsets, and
- * could be any marker, that enables the implementation to find a
- * specific point in the directory stream.
+ * *off* should be any non-zero value that the filesystem can use to
+ * identify the current point in the directory stream. It does not
+ * need to be the actual physical position. A value of zero is
+ * reserved to mean "from the beginning", and should therefore never
+ * be used (the first call to fuse_add_direntry should be passed the
+ * offset of the second directory entry).
  *
  * @param req request handle
  * @param buf the point where the new entry will be added to the buffer
@@ -1414,18 +1443,7 @@ size_t fuse_add_direntry(fuse_req_t req, char *buf, size_t bufsize,
 /**
  * Add a directory entry to the buffer with the attributes
  *
- * Buffer needs to be large enough to hold the entry.  If it's not,
- * then the entry is not filled in but the size of the entry is still
- * returned.  The caller can check this by comparing the bufsize
- * parameter with the returned entry size.  If the entry size is
- * larger than the buffer size, the operation failed.
- *
- * From the 'stbuf' argument the st_ino field and bits 12-15 of the
- * st_mode field are used.  The other fields are ignored.
- *
- * Note: offsets do not necessarily represent physical offsets, and
- * could be any marker, that enables the implementation to find a
- * specific point in the directory stream.
+ * See documentation of `fuse_add_direntry()` for more details.
  *
  * @param req request handle
  * @param buf the point where the new entry will be added to the buffer
@@ -1507,7 +1525,11 @@ int fuse_reply_poll(fuse_req_t req, unsigned revents);
 int fuse_lowlevel_notify_poll(struct fuse_pollhandle *ph);
 
 /**
- * Notify to invalidate cache for an inode
+ * Notify to invalidate cache for an inode.
+ *
+ * Added in FUSE protocol version 7.12. If the kernel does not support
+ * this (or a newer) version, the function will return -ENOSYS and do
+ * nothing.
  *
  * @param se the session object
  * @param ino the inode number
@@ -1523,9 +1545,13 @@ int fuse_lowlevel_notify_inval_inode(struct fuse_session *se, fuse_ino_t ino,
  * Notify to invalidate parent attributes and the dentry matching
  * parent/name
  *
- * To avoid a deadlock don't call this function from a filesystem operation and
- * don't call it with a lock held that can also be held by a filesystem
- * operation.
+ * To avoid a deadlock don't call this function from a filesystem
+ * operation and don't call it with a lock held that can also be held
+ * by a filesystem operation.
+ *
+ * Added in FUSE protocol version 7.12. If the kernel does not support
+ * this (or a newer) version, the function will return -ENOSYS and do
+ * nothing.
  *
  * @param se the session object
  * @param parent inode number
@@ -1537,18 +1563,21 @@ int fuse_lowlevel_notify_inval_entry(struct fuse_session *se, fuse_ino_t parent,
 				     const char *name, size_t namelen);
 
 /**
- * As of kernel 4.8, this function behaves like
- * fuse_lowlevel_notify_inval_entry() with the following additional
- * effect:
+ * This function behaves like fuse_lowlevel_notify_inval_entry() with
+ * the following additional effect (at least as of Linux kernel 4.8):
  *
  * If the provided *child* inode matches the inode that is currently
  * associated with the cached dentry, and if there are any inotify
  * watches registered for the dentry, then the watchers are informed
  * that the dentry has been deleted.
  *
- * To avoid a deadlock don't call this function from a filesystem operation and
- * don't call it with a lock held that can also be held by a filesystem
- * operation.
+ * To avoid a deadlock don't call this function from a filesystem
+ * operation and don't call it with a lock held that can also be held
+ * by a filesystem operation.
+ *
+ * Added in FUSE protocol version 7.18. If the kernel does not support
+ * this (or a newer) version, the function will return -ENOSYS and do
+ * nothing.
  *
  * @param se the session object
  * @param parent inode number
@@ -1575,6 +1604,10 @@ int fuse_lowlevel_notify_delete(struct fuse_session *se,
  * If this function returns an error, then the store wasn't fully
  * completed, but it may have been partially completed.
  *
+ * Added in FUSE protocol version 7.15. If the kernel does not support
+ * this (or a newer) version, the function will return -ENOSYS and do
+ * nothing.
+ *
  * @param se the session object
  * @param ino the inode number
  * @param offset the starting offset into the file to store to
@@ -1593,8 +1626,8 @@ int fuse_lowlevel_notify_store(struct fuse_session *se, fuse_ino_t ino,
  * the returned data.
  *
  * Only present pages are returned in the retrieve reply.  Retrieving
- * stops when it finds a non-present page and only data prior to that is
- * returned.
+ * stops when it finds a non-present page and only data prior to that
+ * is returned.
  *
  * If this function returns an error, then the retrieve will not be
  * completed and no reply will be sent.
@@ -1602,6 +1635,10 @@ int fuse_lowlevel_notify_store(struct fuse_session *se, fuse_ino_t ino,
  * This function doesn't change the dirty state of pages in the kernel
  * buffer.  For dirty pages the write() method will be called
  * regardless of having been retrieved previously.
+ *
+ * Added in FUSE protocol version 7.15. If the kernel does not support
+ * this (or a newer) version, the function will return -ENOSYS and do
+ * nothing.
  *
  * @param se the session object
  * @param ino the inode number
@@ -1723,6 +1760,7 @@ struct fuse_cmdline_opts {
 	int show_version;
 	int show_help;
 	int clone_fd;
+	unsigned int max_idle_threads;
 };
 
 /**
@@ -1735,6 +1773,9 @@ struct fuse_cmdline_opts {
  * If neither -o subtype= or -o fsname= options are given, a new
  * subtype option will be added and set to the basename of the program
  * (the fsname will remain unset, and then defaults to "fuse").
+ *
+ * Known options will be removed from *args*, unknown options will
+ * remain.
  *
  * @param args argument vector (input+output)
  * @param opts output argument for parsed options
@@ -1759,7 +1800,7 @@ int fuse_parse_cmdline(struct fuse_args *args,
  * and the function returns NULL.
  *
  * Option parsing skips argv[0], which is assumed to contain the
- * program name. To prevent accidentially passing an option in
+ * program name. To prevent accidentally passing an option in
  * argv[0], this element must always be present (even if no options
  * are specified). It may be set to the empty string ('\0') if no
  * reasonable value can be provided.
@@ -1817,11 +1858,15 @@ int fuse_session_loop(struct fuse_session *se);
  * fuse_session_loop().
  *
  * @param se the session
- * @param clone_fd whether to use separate device fds for each thread
- *                 (may increase performance)
+ * @param config session loop configuration 
  * @return see fuse_session_loop()
  */
-int fuse_session_loop_mt(struct fuse_session *se, int clone_fd);
+#if FUSE_USE_VERSION < 32
+int fuse_session_loop_mt_31(struct fuse_session *se, int clone_fd);
+#define fuse_session_loop_mt(se, clone_fd) fuse_session_loop_mt_31(se, clone_fd)
+#else
+int fuse_session_loop_mt(struct fuse_session *se, struct fuse_loop_config *config);
+#endif
 
 /**
  * Flag a session as terminated.

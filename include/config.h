@@ -96,7 +96,7 @@
 #define PACKAGE_NAME "fuse"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "fuse 3.0.0"
+#define PACKAGE_STRING "fuse 3.2.1"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "fuse"
@@ -105,13 +105,13 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "3.0.0"
+#define PACKAGE_VERSION "3.2.1"
 
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
 
 /* Version number of package */
-#define VERSION "3.0.0"
+#define VERSION "3.2.1"
 
 /* Enable large inode numbers on Mac OS X 10.5.  */
 #ifndef _DARWIN_USE_64_BIT_INODE

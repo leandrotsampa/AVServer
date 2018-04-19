@@ -1,8 +1,6 @@
 #ifndef __AVServer_h
 #define __AVServer_h
 
-#define FUSE_USE_VERSION 30
-
 #include <config.h>
 
 #include <fuse.h>

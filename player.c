@@ -1697,9 +1697,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 		break;
 		case DEV_PAINEL:
 		{
-			if (strEquals(strdup(buf), "TIME", true))
-				player_showtime();
-			else
+			if (size <= 5)
 			{
 				HI_U8 DigDisCode[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
 				HI_U8 UCharDisCode[] = {

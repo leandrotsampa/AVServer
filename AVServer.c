@@ -241,7 +241,7 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	if (!player)
+	if (!player || size < 4)
 		return -EINVAL;
 	else if (type == DVB_PAINEL_DEV)
 		return player->write(DEV_PAINEL, buf, size);

@@ -1697,8 +1697,10 @@ int player_write(int dev_type, const char *buf, size_t size)
 		break;
 		case DEV_PAINEL:
 		{
-			if (size <= 5)
+			if (size <= 6)
 			{
+				struct tm hour;
+				int i, value = 0;
 				HI_U8 DigDisCode[] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
 				HI_U8 UCharDisCode[] = {
 					0xFF, 0xFF, 0x39, 0xFF, 0x79,
@@ -1718,15 +1720,26 @@ int player_write(int dev_type, const char *buf, size_t size)
 					0xFF
 				};
 
-				int i, value = 0;
-				for (i = 0; i < 4; i++)
-				{
-					if (buf[i] >= '0' && buf[i] <= '9')
-						value |= DigDisCode[buf[i] - 48] << (8 * i);
-					else if (buf[i] >= 'A' && buf[i] <= 'Z')
-						value |= UCharDisCode[buf[i] - 65] << (8 * i);
-					else
-						value |= LCharDisCode[buf[i] - 97] << (8 * i);
+				if (!strncmp(buf, "....", 4)) {
+					value = 0x0; /* Clear panel */
+				} else if (strptime(buf, "%H:%M", &hour) != NULL) {
+					HI_UNF_KEYLED_TIME_S stTime;
+					stTime.u32Hour = hour.tm_hour;
+					stTime.u32Minute = hour.tm_min;
+
+					if (HI_UNF_LED_DisplayTime(stTime) != HI_SUCCESS)
+						printf("[ERROR] %s: Time not writed to keyled.\n", __FUNCTION__);
+
+					return size;
+				} else {
+					for (i = 0; i < 4; i++) {
+						if (buf[i] >= '0' && buf[i] <= '9')
+							value |= DigDisCode[buf[i] - 48] << (8 * i);
+						else if (buf[i] >= 'A' && buf[i] <= 'Z')
+							value |= UCharDisCode[buf[i] - 65] << (8 * i);
+						else
+							value |= LCharDisCode[buf[i] - 97] << (8 * i);
+					}
 				}
 
 				if (HI_UNF_LED_Display(value) != HI_SUCCESS)

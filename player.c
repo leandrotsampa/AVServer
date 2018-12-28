@@ -1,5 +1,4 @@
 #include <AVServer.h>
-#include <module.h>
 #include <unistd.h>
 #include <hi_adp_mpi.h>
 #include <hi_common.h>
@@ -329,8 +328,6 @@ bool player_create(void)
 
 	if (!player)
 		return false;
-	else if (load_module(&module, module_len, ""))
-		printf("[ERROR] %s -> HI_SYS_Load failed.\n", __FUNCTION__);
 
 	if (HI_SYS_Init() != HI_SUCCESS)
 	{
@@ -1724,6 +1721,9 @@ int player_write(int dev_type, const char *buf, size_t size)
 					if (HI_UNF_LED_DisplayTime(stTime) != HI_SUCCESS)
 						printf("[ERROR] %s: Time not writed to keyled.\n", __FUNCTION__);
 
+					return size;
+				} else if (!strncmp(buf, "TIME", 4)) {
+					player_showtime();
 					return size;
 				} else {
 					for (i = 0; i < 4; i++) {

@@ -153,7 +153,7 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 				/* Make cache persistent even if file is closed,
 				 *  this makes it easier to see the effects.
 				 */
-				fi->keep_cache = 1;
+				fi->keep_cache = 0;
 			break;
 			default:
 			break;
@@ -562,7 +562,7 @@ int main(int argc, char *argv[])
 	printf("# Contact:                          #\n");
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
-	printf("# 	2.3                         #\n");
+	printf("# 	2.4                         #\n");
 	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);

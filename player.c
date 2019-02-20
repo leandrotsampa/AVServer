@@ -199,6 +199,7 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 		int aspect;
 		int framerate;
 		bool progressive;
+		FILE *file = NULL;
 		HI_UNF_VIDEO_FRAME_INFO_S *vFrame = (HI_UNF_VIDEO_FRAME_INFO_S *)para;
 
 		/** VIDEO_EVENT_SIZE_CHANGED **/
@@ -257,6 +258,43 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 				player->event_status |= (1 << player->events[2].type);
 				pthread_mutex_unlock(&player->m_event);
 			}
+
+		/** Fix Auto-change of 4:3 <--> 16:9 **/
+		file = fopen((aspect == VIDEO_FORMAT_4_3) ? "/proc/stb/video/policy" : "/proc/stb/video/policy2", "r");
+		if (file)
+		{
+			char mode[10];
+			HI_UNF_WINDOW_ATTR_S pAttr;
+			fgets(mode, 10, file);
+			fclose(file);
+
+			if (HI_UNF_VO_GetWindowAttr(player->hWindow, &pAttr) == HI_SUCCESS)
+			{
+				unsigned int h, w;
+				bool IsLetterBox = strEquals(mode, "letterbox", false);
+
+				pAttr.bVirtual          = HI_FALSE;
+				pAttr.bUseCropRect      = HI_FALSE;
+				pAttr.stOutputRect.s32X = 0;
+				pAttr.stOutputRect.s32Y = 0;
+
+				if (HI_UNF_DISP_GetVirtualScreen(HI_UNF_DISPLAY1, &w, &h) == HI_SUCCESS)
+				{
+					w -= 2;
+					h -= 4;
+
+					if (pAttr.stOutputRect.s32Width != w || pAttr.stOutputRect.s32Height != h ||
+					    pAttr.stWinAspectAttr.enAspectCvrs != (IsLetterBox ? HI_UNF_VO_ASPECT_CVRS_LETTERBOX : HI_UNF_VO_ASPECT_CVRS_IGNORE))
+					{
+						pAttr.stOutputRect.s32Width = w;
+						pAttr.stOutputRect.s32Height= h;
+						pAttr.stWinAspectAttr.enAspectCvrs = IsLetterBox ? HI_UNF_VO_ASPECT_CVRS_LETTERBOX : HI_UNF_VO_ASPECT_CVRS_IGNORE;
+
+						HI_UNF_VO_SetWindowAttr(player->hWindow, &pAttr);
+					}
+				}
+			}
+		}
 	}
 	else if (player->IsPES)
 	{

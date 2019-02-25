@@ -271,7 +271,12 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 			if (HI_UNF_VO_GetWindowAttr(player->hWindow, &pAttr) == HI_SUCCESS)
 			{
 				unsigned int h, w;
-				bool IsLetterBox = strEquals(mode, "letterbox", false);
+				HI_UNF_VO_ASPECT_CVRS_E aspect = HI_UNF_VO_ASPECT_CVRS_IGNORE; /* Valid for bestfit/non/nonlinear/scale */
+
+				if (strEquals(mode, "letterbox", false))
+					aspect = HI_UNF_VO_ASPECT_CVRS_LETTERBOX;
+				else if (strEquals(mode, "panscan", false))
+					aspect = HI_UNF_VO_ASPECT_CVRS_PAN_SCAN;
 
 				pAttr.bVirtual          = HI_FALSE;
 				pAttr.bUseCropRect      = HI_FALSE;
@@ -283,12 +288,11 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 					w -= 2;
 					h -= 4;
 
-					if (pAttr.stOutputRect.s32Width != w || pAttr.stOutputRect.s32Height != h ||
-					    pAttr.stWinAspectAttr.enAspectCvrs != (IsLetterBox ? HI_UNF_VO_ASPECT_CVRS_LETTERBOX : HI_UNF_VO_ASPECT_CVRS_IGNORE))
+					if (pAttr.stOutputRect.s32Width != w || pAttr.stOutputRect.s32Height != h || pAttr.stWinAspectAttr.enAspectCvrs != aspect)
 					{
 						pAttr.stOutputRect.s32Width = w;
 						pAttr.stOutputRect.s32Height= h;
-						pAttr.stWinAspectAttr.enAspectCvrs = IsLetterBox ? HI_UNF_VO_ASPECT_CVRS_LETTERBOX : HI_UNF_VO_ASPECT_CVRS_IGNORE;
+						pAttr.stWinAspectAttr.enAspectCvrs = aspect;
 
 						HI_UNF_VO_SetWindowAttr(player->hWindow, &pAttr);
 					}

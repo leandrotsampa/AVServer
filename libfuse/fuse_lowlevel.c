@@ -14,6 +14,7 @@
 #include "fuse_kernel.h"
 #include "fuse_opt.h"
 #include "fuse_misc.h"
+#include "mount_util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1807,6 +1808,27 @@ static void do_fallocate(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		fuse_reply_err(req, ENOSYS);
 }
 
+static void do_copy_file_range(fuse_req_t req, fuse_ino_t nodeid_in, const void *inarg)
+{
+	struct fuse_copy_file_range_in *arg = (struct fuse_copy_file_range_in *) inarg;
+	struct fuse_file_info fi_in, fi_out;
+
+	memset(&fi_in, 0, sizeof(fi_in));
+	fi_in.fh = arg->fh_in;
+
+	memset(&fi_out, 0, sizeof(fi_out));
+	fi_out.fh = arg->fh_out;
+
+
+	if (req->se->op.copy_file_range)
+		req->se->op.copy_file_range(req, nodeid_in, arg->off_in,
+					    &fi_in, arg->nodeid_out,
+					    arg->off_out, &fi_out, arg->len,
+					    arg->flags);
+	else
+		fuse_reply_err(req, ENOSYS);
+}
+
 static void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 {
 	struct fuse_init_in *arg = (struct fuse_init_in *) inarg;
@@ -1916,7 +1938,8 @@ static void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		       FUSE_CAP_POSIX_LOCKS);
 	LL_SET_DEFAULT(se->op.flock, FUSE_CAP_FLOCK_LOCKS);
 	LL_SET_DEFAULT(se->op.readdirplus, FUSE_CAP_READDIRPLUS);
-	LL_SET_DEFAULT(se->op.readdirplus, FUSE_CAP_READDIRPLUS_AUTO);
+	LL_SET_DEFAULT(se->op.readdirplus && se->op.readdir,
+		       FUSE_CAP_READDIRPLUS_AUTO);
 	se->conn.time_gran = 1;
 	
 	if (bufsize < FUSE_MIN_READ_BUFFER) {
@@ -2391,6 +2414,7 @@ static struct {
 	[FUSE_BATCH_FORGET] = { do_batch_forget, "BATCH_FORGET" },
 	[FUSE_READDIRPLUS] = { do_readdirplus,	"READDIRPLUS"},
 	[FUSE_RENAME2]     = { do_rename2,      "RENAME2"    },
+	[FUSE_COPY_FILE_RANGE] = { do_copy_file_range, "COPY_FILE_RANGE" },
 	[CUSE_INIT]	   = { cuse_lowlevel_init, "CUSE_INIT"   },
 };
 
@@ -2888,6 +2912,24 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 			close(fd);
 	} while (fd >= 0 && fd <= 2);
 
+	/*
+	 * To allow FUSE daemons to run without privileges, the caller may open
+	 * /dev/fuse before launching the file system and pass on the file
+	 * descriptor by specifying /dev/fd/N as the mount point. Note that the
+	 * parent process takes care of performing the mount in this case.
+	 */
+	fd = fuse_mnt_parse_fuse_fd(mountpoint);
+	if (fd != -1) {
+		if (fcntl(fd, F_GETFD) == -1) {
+			fprintf(stderr,
+				"fuse: Invalid file descriptor /dev/fd/%u\n",
+				fd);
+			return -1;
+		}
+		se->fd = fd;
+		return 0;
+	}
+
 	/* Open channel */
 	fd = fuse_kern_mount(mountpoint, se->mo);
 	if (fd == -1)
@@ -2913,9 +2955,11 @@ int fuse_session_fd(struct fuse_session *se)
 
 void fuse_session_unmount(struct fuse_session *se)
 {
-	fuse_kern_unmount(se->mountpoint, se->fd);
-	free(se->mountpoint);
-	se->mountpoint = NULL;
+	if (se->mountpoint != NULL) {
+		fuse_kern_unmount(se->mountpoint, se->fd);
+		free(se->mountpoint);
+		se->mountpoint = NULL;
+	}
 }
 
 #ifdef linux

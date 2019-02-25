@@ -562,7 +562,7 @@ int main(int argc, char *argv[])
 	printf("# Contact:                          #\n");
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
-	printf("# 	2.4                         #\n");
+	printf("# 	2.5                         #\n");
 	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);

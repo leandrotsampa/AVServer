@@ -858,9 +858,9 @@ struct fuse_lowlevel_ops {
 	/**
 	 * Check file access permissions
 	 *
-	 * This will be called for the access() system call.  If the
-	 * 'default_permissions' mount option is given, this method is not
-	 * called.
+	 * This will be called for the access() and chdir() system
+	 * calls.  If the 'default_permissions' mount option is given,
+	 * this method is not called.
 	 *
 	 * This method is not called under Linux kernel versions 2.4.x
 	 *
@@ -1160,6 +1160,42 @@ struct fuse_lowlevel_ops {
 	 */
 	void (*readdirplus) (fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 			 struct fuse_file_info *fi);
+
+	/**
+	 * Copy a range of data from one file to another
+	 *
+	 * Performs an optimized copy between two file descriptors without the
+	 * additional cost of transferring data through the FUSE kernel module
+	 * to user space (glibc) and then back into the FUSE filesystem again.
+	 *
+	 * In case this method is not implemented, glibc falls back to reading
+	 * data from the source and writing to the destination. Effectively
+	 * doing an inefficient copy of the data.
+	 *
+	 * If this request is answered with an error code of ENOSYS, this is
+	 * treated as a permanent failure with error code EOPNOTSUPP, i.e. all
+	 * future copy_file_range() requests will fail with EOPNOTSUPP without
+	 * being send to the filesystem process.
+	 *
+	 * Valid replies:
+	 *   fuse_reply_write
+	 *   fuse_reply_err
+	 *
+	 * @param req request handle
+	 * @param ino_in the inode number or the source file
+	 * @param off_in starting point from were the data should be read
+	 * @param fi_in file information of the source file
+	 * @param ino_out the inode number or the destination file
+	 * @param off_out starting point where the data should be written
+	 * @param fi_out file information of the destination file
+	 * @param len maximum size of the data to copy
+	 * @param flags passed along with the copy_file_range() syscall
+	 */
+	void (*copy_file_range) (fuse_req_t req, fuse_ino_t ino_in,
+				 off_t off_in, struct fuse_file_info *fi_in,
+				 fuse_ino_t ino_out, off_t off_out,
+				 struct fuse_file_info *fi_out, size_t len,
+				 int flags);
 };
 
 /**
@@ -1531,6 +1567,15 @@ int fuse_lowlevel_notify_poll(struct fuse_pollhandle *ph);
  * this (or a newer) version, the function will return -ENOSYS and do
  * nothing.
  *
+ * If the filesystem has writeback caching enabled, invalidating an
+ * inode will first trigger a writeback of all dirty pages. The call
+ * will block until all writeback requests have completed and the
+ * inode has been invalidated. It will, however, not wait for
+ * completion of pending writeback requests that have been issued
+ * before.
+ *
+ * If there are no dirty pages, this function will never block.
+ *
  * @param se the session object
  * @param ino the inode number
  * @param off the offset in the inode where to start invalidating
@@ -1545,9 +1590,16 @@ int fuse_lowlevel_notify_inval_inode(struct fuse_session *se, fuse_ino_t ino,
  * Notify to invalidate parent attributes and the dentry matching
  * parent/name
  *
- * To avoid a deadlock don't call this function from a filesystem
- * operation and don't call it with a lock held that can also be held
- * by a filesystem operation.
+ * To avoid a deadlock this function must not be called in the
+ * execution path of a related filesytem operation or within any code
+ * that could hold a lock that could be needed to execute such an
+ * operation. As of kernel 4.18, a "related operation" is a lookup(),
+ * symlink(), mknod(), mkdir(), unlink(), rename(), link() or create()
+ * request for the parent, and a setattr(), unlink(), rmdir(),
+ * rename(), setxattr(), removexattr(), readdir() or readdirplus()
+ * request for the inode itself.
+ *
+ * When called correctly, this function will never block.
  *
  * Added in FUSE protocol version 7.12. If the kernel does not support
  * this (or a newer) version, the function will return -ENOSYS and do
@@ -1571,9 +1623,13 @@ int fuse_lowlevel_notify_inval_entry(struct fuse_session *se, fuse_ino_t parent,
  * watches registered for the dentry, then the watchers are informed
  * that the dentry has been deleted.
  *
- * To avoid a deadlock don't call this function from a filesystem
- * operation and don't call it with a lock held that can also be held
- * by a filesystem operation.
+ * To avoid a deadlock this function must not be called while
+ * executing a related filesytem operation or while holding a lock
+ * that could be needed to execute such an operation (see the
+ * description of fuse_lowlevel_notify_inval_entry() for more
+ * details).
+ *
+ * When called correctly, this function will never block.
  *
  * Added in FUSE protocol version 7.18. If the kernel does not support
  * this (or a newer) version, the function will return -ENOSYS and do

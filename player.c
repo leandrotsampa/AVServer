@@ -1672,6 +1672,8 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 		player->poll_status |= (1 << dev_type);
 		player->poll_handle[dev_type] = ph;
 	}
+	else if (ph)
+		fuse_pollhandle_destroy(ph);
 	pthread_mutex_unlock(&player->m_poll);
 
 	return 0;
@@ -1854,7 +1856,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 	if (dev_type == DEV_AUDIO && IsHeader)
 	{
 		/** ((Header + Data) - ES) = Get the init position of ES Data **/
-		size_t start= (player->p2e[dev_type].size + size) - player->p2e[dev_type].es_size;
+		size_t start = (player->p2e[dev_type].size + size) - player->p2e[dev_type].es_size;
 		/** Header - start = Get the ES Data Size in Header **/
 		size_t length = player->p2e[dev_type].size - start;
 

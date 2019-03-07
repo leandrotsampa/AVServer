@@ -147,26 +147,16 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 					fi->fh = open(filename, O_WRONLY);
 					player->set_dvr(true);
 				}
-
-				fi->direct_io = 1;
-				fi->nonseekable = 1;
-				/* Make cache persistent even if file is closed,
-				 *  this makes it easier to see the effects.
-				 */
-				fi->keep_cache = 0;
 			break;
 			default:
 			break;
 		}
-		//dvb_ringbuffer_flush_spinlock_wakeup(&av7110->aout);
-		//dvb_ringbuffer_flush_spinlock_wakeup(&av7110->avout);
-		//av7110->video_blank = 1;
-		//av7110->audiostate.AV_sync_state = 1;
-		//av7110->videostate.stream_source = VIDEO_SOURCE_DEMUX;
-
-		/*  empty event queue */
-		//av7110->video_events.eventr = av7110->video_events.eventw = 0;
 	}
+
+	fi->direct_io  = 1;
+	fi->keep_cache = 0;
+	fi->flush      = 0;
+	fi->nonseekable= 1;
 
 	return 0;
 }
@@ -208,32 +198,6 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int dvb_hisi_do_read(char *buf, size_t size, off_t offset)
-{
-	printf("%s -> Called.\n", __FUNCTION__);
-
-	/*if (offset >= dvb_hisi_size)
-		return 0;
-
-	if (size > dvb_hisi_size - offset)
-		size = dvb_hisi_size - offset;
-
-	memcpy(buf, dvb_hisi_buf + offset, size);*/
-	return 0;
-}
-
-static int dvb_hisi_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
-	printf("%s -> Called.\n", __FUNCTION__);
-	//struct fuse_context *cxt = fuse_get_context();
-	//struct class_ops *player = (struct class_ops *)cxt->private_data;
-
-	if (dvb_hisi_file_type(path) < DVB_FILE)
-		return -EINVAL;
-
-	return dvb_hisi_do_read(buf, size, offset);
-}
-
 static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
 	int ret = -EINVAL;
@@ -243,8 +207,6 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 
 	if (!player || size < 4)
 		return -EINVAL;
-	else if (type == DVB_PAINEL_DEV)
-		return player->write(DEV_PAINEL, buf, size);
 
 	switch (type)
 	{
@@ -258,6 +220,9 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 			ret = player->write(DEV_DVR, buf, size);
 			if (ret > 0 && fi->fh >= 0)
 				write(fi->fh, buf, ret);
+		break;
+		case DVB_PAINEL_DEV:
+			ret = player->write(DEV_PAINEL, buf, size);
 		break;
 	}
 
@@ -433,7 +398,6 @@ static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file
 		break;
 		case VIDEO_GET_STATUS:
 			printf("%s: VIDEO_GET_STATUS\n", __FUNCTION__);
-			//trick_dlen = sizeof(struct video_status);
 
 			return player->status(DEV_VIDEO, (struct video_status *)data) - 1;
 		break;
@@ -511,6 +475,8 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 
 	if (!player)
 	{
+		if (ph)
+			fuse_pollhandle_destroy(ph);
 		*reventsp = -EINVAL;
 		return 0;
 	}
@@ -529,6 +495,8 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 			return player->poll(DEV_DVR, ph, reventsp, dvb_hisi_open_mask & (1 << type));
 		break;
 		default:
+			if (ph)
+				fuse_pollhandle_destroy(ph);
 			*reventsp = -EINVAL;
 		break;
 	}
@@ -543,7 +511,6 @@ static struct fuse_operations dvb_hisi_oper = {
 	.readdir	= dvb_hisi_readdir,
 	.open		= dvb_hisi_open,
 	.release	= dvb_hisi_release,
-	.read		= dvb_hisi_read,
 	.write		= dvb_hisi_write,
 	.ioctl		= dvb_hisi_ioctl,
 	.poll		= dvb_hisi_poll,
@@ -562,7 +529,7 @@ int main(int argc, char *argv[])
 	printf("# Contact:                          #\n");
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
-	printf("# 	2.5                         #\n");
+	printf("# 	2.6                         #\n");
 	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);

@@ -2735,11 +2735,13 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 			fprintf(stderr, "fuse: copy from pipe: %s\n",
 				strerror(-res));
 			fuse_ll_clear_pipe(se);
+			free(buf->mem);
 			return res;
 		}
 		if (res < tmpbuf.size) {
 			fprintf(stderr, "fuse: copy from pipe: short read\n");
 			fuse_ll_clear_pipe(se);
+			free(buf->mem);
 			return -EIO;
 		}
 		assert(res == tmpbuf.size);
@@ -2768,8 +2770,10 @@ restart:
 	res = read(ch ? ch->fd : se->fd, buf->mem, se->bufsize);
 	err = errno;
 
-	if (fuse_session_exited(se))
+	if (fuse_session_exited(se)) {
+		free(buf->mem);
 		return 0;
+	}
 	if (res == -1) {
 		/* ENOENT means the operation was interrupted, it's safe
 		   to restart */
@@ -2780,6 +2784,7 @@ restart:
 			/* Filesystem was unmounted, or connection was aborted
 			   via /sys/fs/fuse/connections */
 			fuse_session_exit(se);
+			free(buf->mem);
 			return 0;
 		}
 		/* Errors occurring during normal operation: EINTR (read
@@ -2787,10 +2792,12 @@ restart:
 		   umounted) */
 		if (err != EINTR && err != EAGAIN)
 			perror("fuse: reading device");
+		free(buf->mem);
 		return -err;
 	}
 	if ((size_t) res < sizeof(struct fuse_in_header)) {
 		fprintf(stderr, "short read on fuse device\n");
+		free(buf->mem);
 		return -EIO;
 	}
 

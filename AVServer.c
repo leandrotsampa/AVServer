@@ -246,7 +246,7 @@ static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static int dvb_hisi_ioctl(const char *path, int cmd, void *arg, struct fuse_file_info *fi, unsigned int flags, void *data)
+static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct fuse_file_info *fi, unsigned int flags, void *data)
 {
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();

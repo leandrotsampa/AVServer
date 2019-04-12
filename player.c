@@ -1656,6 +1656,7 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 					*reventsp = POLLIN;
 			}
 
+			fuse_pollhandle_destroy(ph);
 			pthread_mutex_unlock(&player->m_poll);
 			return 0;
 		}

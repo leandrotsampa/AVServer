@@ -29,8 +29,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
+#include <version.h>
 #include <AVServer.h>
 
 #define AUDIO_DEV	"audio0"
@@ -50,8 +51,7 @@ enum {
 	DVB_PAINEL_DEV,
 };
 
-static int dvb_hisi_file_type(const char *path)
-{
+static int dvb_hisi_file_type(const char *path) {
 	if (strEquals(strdup(path), "/", false))
 		return DVB_ROOT;
 	else if (strEquals(strdup(path), "/" AUDIO_DEV, false))
@@ -66,34 +66,33 @@ static int dvb_hisi_file_type(const char *path)
 	return DVB_NONE;
 }
 
-static void *dvb_hisi_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
-{
-	printf("%s -> Called.\n", __FUNCTION__);
+static void *dvb_hisi_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
+	(void) conn;
+	(void) cfg;
 	struct class_ops *player = player_get_ops();
 
+	printf("%s -> Called.\n", __FUNCTION__);
 	if (player && player->create())
 		return player;
 
 	return NULL;
 }
 
-static void dvb_hisi_destroy(void *private_data)
-{
-	printf("%s -> Called.\n", __FUNCTION__);
+static void dvb_hisi_destroy(void *private_data) {
 	struct class_ops *player = (struct class_ops *)private_data;
 
+	printf("%s -> Called.\n", __FUNCTION__);
 	if (player)
 		player->destroy();
 }
 
-static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi)
-{
+static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi) {
+	(void) fi;
 	stbuf->st_uid = getuid();
 	stbuf->st_gid = getgid();
 	stbuf->st_atime = stbuf->st_mtime = time(NULL);
 
-	switch (dvb_hisi_file_type(path))
-	{
+	switch (dvb_hisi_file_type(path)) {
 		case DVB_ROOT:
 			stbuf->st_mode  = S_IFDIR | 0755;
 			stbuf->st_nlink = 2;
@@ -114,19 +113,16 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 	return 0;
 }
 
-static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
-{
+static int dvb_hisi_open(const char *path, struct fuse_file_info *fi) {
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
 	if (type == DVB_NONE)
 		return -ENOENT;
-	if ((fi->flags & O_ACCMODE) != O_RDONLY)
-	{
+	if ((fi->flags & O_ACCMODE) != O_RDONLY) {
 		/* Lock for only 1 access. */
-		switch (type)
-		{
+		switch (type) {
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
 			case DVB_DVR_DEV:
@@ -140,8 +136,7 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 				 * gets filled up periodically by producer thread and consumed
 				 * on read.  Tell FUSE as such.
 				 */
-				if (type == DVB_DVR_DEV)
-				{
+				if (type == DVB_DVR_DEV) {
 					char filename[32];
 					snprintf(filename, sizeof(filename), "/dev/dvb/adapter%c/dvr0", path[(strlen(path)-1)]);
 					fi->fh = open(filename, O_WRONLY);
@@ -161,17 +156,14 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
-{
+static int dvb_hisi_release(const char *path, struct fuse_file_info *fi) {
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	if ((fi->flags & O_ACCMODE) != O_RDONLY)
-	{
+	if ((fi->flags & O_ACCMODE) != O_RDONLY) {
 		/* Release for access. */
-		switch (type)
-		{
+		switch (type) {
 			case DVB_AUDIO_DEV:
 			case DVB_VIDEO_DEV:
 			case DVB_DVR_DEV:
@@ -182,8 +174,7 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 					player->stop(DEV_AUDIO);
 				else if (type == DVB_VIDEO_DEV && player)
 					player->stop(DEV_VIDEO);
-				else if (type == DVB_DVR_DEV)
-				{
+				else if (type == DVB_DVR_DEV) {
 					if (fi->fh >= 0)
 						close(fi->fh);
 
@@ -198,8 +189,8 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
+static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+	(void) offset;
 	int ret = -EINVAL;
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
@@ -208,8 +199,7 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	if (!player || size < 4)
 		return -EINVAL;
 
-	switch (type)
-	{
+	switch (type) {
 		case DVB_AUDIO_DEV:
 			ret = player->write(DEV_AUDIO, buf, size);
 		break;
@@ -229,10 +219,12 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 	return ret;
 }
 
-static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
-{
-	printf("%s -> Called.\n", __FUNCTION__);
+static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
+	(void) offset;
+	(void) fi;
+	(void) flags;
 
+	printf("%s -> Called.\n", __FUNCTION__);
 	if (dvb_hisi_file_type(path) != DVB_ROOT)
 		return -ENOENT;
 
@@ -246,22 +238,20 @@ static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct fuse_file_info *fi, unsigned int flags, void *data)
-{
+static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct fuse_file_info *fi, unsigned int flags, void *data) {
+	(void) fi;
+	(void) flags;
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	switch (type)
-	{
+	switch (type) {
 		case DVB_AUDIO_DEV:
 		case DVB_VIDEO_DEV:
 			if (!player)
 				return -EINVAL;
-			if (!(dvb_hisi_open_mask & (1 << type)))
-			{
-				switch (cmd)
-				{
+			if (!(dvb_hisi_open_mask & (1 << type))) {
+				switch (cmd) {
 					case AUDIO_GET_STATUS:
 					case VIDEO_GET_STATUS:
 					case VIDEO_GET_EVENT:
@@ -278,8 +268,7 @@ static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct 
 		break;
 	}
 
-	switch (cmd)
-	{
+	switch (cmd) {
 		/* AUDIO IOCTL
 		 */
 		case AUDIO_STOP:
@@ -467,14 +456,13 @@ static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct 
 	return 0;
 }
 
-static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp)
-{
+static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fuse_pollhandle *ph, unsigned *reventsp) {
+	(void) fi;
 	int type = dvb_hisi_file_type(path);
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	if (!player)
-	{
+	if (!player) {
 		if (ph)
 			fuse_pollhandle_destroy(ph);
 		*reventsp = -EINVAL;
@@ -483,8 +471,7 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 	else
 		*reventsp = 0;
 
-	switch (type)
-	{
+	switch (type) {
 		case DVB_AUDIO_DEV:
 			return player->poll(DEV_AUDIO, ph, reventsp, false);
 		break;
@@ -516,8 +503,7 @@ static struct fuse_operations dvb_hisi_oper = {
 	.poll		= dvb_hisi_poll,
 };
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
 	printf("_____________________________________\n");
 	printf("#   _   _   _   _   _   _   _   _   #\n");
 	printf("#  / \\ / \\ / \\ / \\ / \\ / \\ / \\ / \\  #\n");
@@ -529,7 +515,7 @@ int main(int argc, char *argv[])
 	printf("# Contact:                          #\n");
 	printf("# 	leandrotsampa@yahoo.com.br  #\n");
 	printf("# Current Version:                  #\n");
-	printf("# 	2.6                         #\n");
+	printf("# 	%s  #\n", AVSERVER_VERSION);
 	printf("\e[4m#___________________________________#\e[24m\n\n");
 
 	return fuse_main(argc, argv, &dvb_hisi_oper, NULL);

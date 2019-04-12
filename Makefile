@@ -37,7 +37,8 @@ HI_DEPEND_LIBS := -L$(HI_SHARED_LIB_DIR) $(SYS_LIBS) $(HI_LIBS)
 #===============================================================================
 # local variable
 #===============================================================================
-OUT := AVServer
+OUT     := AVServer
+VERSION := \"$(shell date "+%Y.%m-%d (Build: %H%M%S)")\"
 
 LOCAL_SRCS := AVServer.c \
               player.c \
@@ -84,8 +85,11 @@ default: $(OUT)
 strip: $(OUT)
 	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-strip --strip-all $(OUT)
 
-$(OUT): clean
+$(OUT): clean version
 	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-gcc -Wall -D_FILE_OFFSET_BITS=64 $(CFLAGS) $(HI_DEPEND_LIBS) -o $(OUT) $(LOCAL_SRCS) $(LIBFUSE_SRCS) $(COMMON_SRCS)
 
 clean:
 	@rm -f $(OUT)
+
+version:
+	@echo "#define AVSERVER_VERSION $(VERSION)">version.h

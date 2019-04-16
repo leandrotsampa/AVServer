@@ -52,15 +52,15 @@ enum {
 };
 
 static int dvb_hisi_file_type(const char *path) {
-	if (strEquals(strdup(path), "/", false))
+	if (strEquals((char*)path, "/", false))
 		return DVB_ROOT;
-	else if (strEquals(strdup(path), "/" AUDIO_DEV, false))
+	else if (strEquals((char*)path, "/" AUDIO_DEV, false))
 		return DVB_AUDIO_DEV;
-	else if (strEquals(strdup(path), "/" VIDEO_DEV, false))
+	else if (strEquals((char*)path, "/" VIDEO_DEV, false))
 		return DVB_VIDEO_DEV;
-	else if (strEquals(strdup(path), "/" DVR_DEV, true))
+	else if (strEquals((char*)path, "/" DVR_DEV, true))
 		return DVB_DVR_DEV;
-	else if (strEquals(strdup(path), "/" PAINEL_DEV, false))
+	else if (strEquals((char*)path, "/" PAINEL_DEV, false))
 		return DVB_PAINEL_DEV;
 
 	return DVB_NONE;

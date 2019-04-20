@@ -414,8 +414,7 @@ bool player_create(void)
 	}
 
 	/** Auto load all codecs **/
-	lib_dir = opendir ("/usr/lib");
-	if (lib_dir)
+	if ((lib_dir = opendir ("/usr/lib")) || (lib_dir = opendir ("/system/lib")))
 	{
 		struct dirent *file = readdir(lib_dir);
 

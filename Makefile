@@ -8,7 +8,7 @@ endif
 
 SRC_DIR := $(CURDIR)
 
-CFLAGS := -Wall -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -D_FILE_OFFSET_BITS=64
+CFLAGS := -Wl,--unresolved-symbols=ignore-in-shared-libs -Wall -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -D_FILE_OFFSET_BITS=64
 CFLAGS += -DCHIP_TYPE_$(CFG_HI_CHIP_TYPE) -DCFG_HI_SDK_VERSION=$(CFG_HI_SDK_VERSION)
 CFLAGS += $(CFG_HI_BOARD_CONFIGS)
 
@@ -43,6 +43,9 @@ VERSION := \"$(shell date "+%Y.%m-%d (Build: %H%M%S)")\"
 LOCAL_SRCS := AVServer.c \
               player.c \
 			  string_ext.c
+
+CFLAGS         += -DHAVE_AVCODEC
+HI_DEPEND_LIBS += -l:libavcodec.so.56
 
 CFLAGS += -DFUSERMOUNT_DIR=\"/tmp\" -D_REENTRANT -DFUSE_USE_VERSION=31
 LIBFUSE_SRCS := libfuse/fuse.c \

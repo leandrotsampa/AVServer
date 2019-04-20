@@ -66,7 +66,19 @@
 #define PLAYER_DEMUX_PORT 4
 
 static struct class_ops player_ops;
-
+static unsigned char u8DecOpenBuf[1024];
+#if defined(HAVE_AVCODEC)
+/* This is for use libavcodec.so.56 of Hisilicon HiPlayer.
+ * Is necessary for codecs: libHA.AUDIO.FFMPEG_ADEC.decode.so
+ *                          libHA.AUDIO.FFMPEG_WMAPRO.decode.so
+ *                          libHV.VIDEO.FFMPEG_VDEC.decode.so
+ */
+extern void avcodec_register_all(void);
+extern void *avcodec_find_decoder_by_name(const char *name);
+extern void *avcodec_alloc_context3(void *codec);
+extern void avcodec_free_context(void **avctx);
+static void *avcodec_context = NULL;
+#endif
 struct s_player {
 	bool IsCreated;
 	int PlayerMode;		/* 0 demux, 1 memory */
@@ -363,6 +375,8 @@ bool player_create(void)
 	printf("[INFO] %s -> called.\n", __FUNCTION__);
 	DIR *lib_dir;
 	HI_UNF_SYNC_ATTR_S       stSyncAttr;
+	HI_UNF_VCODEC_ATTR_S     stVDecAttr;
+	HI_UNF_ACODEC_ATTR_S     stACodecAttr;
 	HI_UNF_AVPLAY_ATTR_S     stAvplayAttr;
 	HI_UNF_AVPLAY_OPEN_OPT_S OpenOpt;
 	HI_UNF_AUDIOTRACK_ATTR_S stTrackAttr;
@@ -497,8 +511,19 @@ bool player_create(void)
 		goto TRACK_DESTROY;
 	}
 
-	HIADP_AVPlay_SetAdecAttr(player->hPlayer, HA_AUDIO_ID_AAC, HD_DEC_MODE_RAWPCM, 0);
-	HIADP_AVPlay_SetVdecAttr(player->hPlayer, HI_UNF_VCODEC_TYPE_MPEG2, HI_UNF_VCODEC_MODE_NORMAL);
+	/* Set Audio Codec to AAC */
+	HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_ADEC, &stACodecAttr);
+	stACodecAttr.enType = HA_AUDIO_ID_AAC;
+	HA_AAC_DecGetDefalutOpenParam(&stACodecAttr.stDecodeParam);
+	HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_ADEC, &stACodecAttr);
+
+	/* Set Video Codec to MPEG2 */
+	HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VDEC, &stVDecAttr);
+	stVDecAttr.enType      = HI_UNF_VCODEC_TYPE_MPEG2;
+	stVDecAttr.enMode      = HI_UNF_VCODEC_MODE_NORMAL;
+	stVDecAttr.u32ErrCover = 100;
+	stVDecAttr.u32Priority = 3;
+	HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VDEC, &stVDecAttr);
 
 	HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_SYNC, &stSyncAttr);
 	stSyncAttr.enSyncRef = HI_UNF_SYNC_REF_AUDIO;
@@ -551,6 +576,9 @@ bool player_create(void)
 
 	player_ops.priv = player;
 	player_create_painel();
+#if defined(HAVE_AVCODEC)
+	avcodec_register_all(); // Load all codecs in libavcodec.so.56
+#endif
 	return true;
 
 SND_DETACH:
@@ -705,48 +733,114 @@ bool player_set_type(int dev_type, int type)
 		case DEV_AUDIO:
 		{
 			char s_mode[12];
-			HA_CODEC_ID_E htype;
+			HI_UNF_ACODEC_ATTR_S stAttr;
 			FILE *file = NULL;
 			HI_UNF_SND_HDMI_MODE_E h_mode = HI_UNF_SND_HDMI_MODE_LPCM;
 
+			if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_ADEC, &stAttr) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to get Audio Attribute for Type %d.\n", __FUNCTION__, type);
+				return false;
+			}
+#if defined(HAVE_AVCODEC)
+			if (avcodec_context)
+			{
+				avcodec_free_context(&avcodec_context);
+				avcodec_context = NULL;
+			}
+#endif
 			switch (type)
 			{
 				case AUDIO_STREAMTYPE_AC3:
 				case AUDIO_STREAMTYPE_DDP:
-					htype = HA_AUDIO_ID_DOLBY_PLUS;
-					file  = fopen("/proc/stb/audio/ac3", "r");
+				{
+					file = fopen("/proc/stb/audio/ac3", "r");
+#if defined(DOLBYPLUS_HACODEC_SUPPORT)
+					DOLBYPLUS_DECODE_OPENCONFIG_S *stConfig = (DOLBYPLUS_DECODE_OPENCONFIG_S*)u8DecOpenBuf;
+					HA_DOLBYPLUS_DecGetDefalutOpenConfig(stConfig);
+					stConfig->enDrcMode = DOLBYPLUS_DRC_RF;
+					stConfig->enDmxMode = DOLBYPLUS_DMX_SRND;
+					stAttr.enType = HA_AUDIO_ID_DOLBY_PLUS;
+					HA_DOLBYPLUS_DecGetDefalutOpenParam(&stAttr.stDecodeParam, stConfig);
+					stAttr.stDecodeParam.enDecMode = HD_DEC_MODE_SIMUL;
+#elif defined(HAVE_AVCODEC)
+					HA_FFMPEG_DECODE_OPENCONFIG_S *stConfig = (HA_FFMPEG_DECODE_OPENCONFIG_S*)&u8DecOpenBuf[sizeof(u8DecOpenBuf)-sizeof(HA_FFMPEG_DECODE_OPENCONFIG_S)];
+					HA_FFMPEG_DecGetDefalutOpenConfig(stConfig);
+					/* If avcodec_find_decoder_by_name return NULL the codec not will work. */
+					avcodec_context = avcodec_alloc_context3(avcodec_find_decoder_by_name("eac3"));
+					stConfig->hAvCtx = avcodec_context;
+					stAttr.enType = HA_AUDIO_ID_FFMPEG_DECODE;
+					HA_FFMPEGC_DecGetDefalutOpenParam(&stAttr.stDecodeParam, stConfig);
+#endif
+				}
 				break;
 				case AUDIO_STREAMTYPE_AAC:
 				case AUDIO_STREAMTYPE_AACPLUS:
 				case AUDIO_STREAMTYPE_AACHE:
-					htype = HA_AUDIO_ID_AAC;
-					file  = fopen("/proc/stb/audio/aac", "r");
+					file = fopen("/proc/stb/audio/aac", "r");
+					stAttr.enType = HA_AUDIO_ID_AAC;
+					HA_AAC_DecGetDefalutOpenParam(&stAttr.stDecodeParam);
 				break;
 				case AUDIO_STREAMTYPE_DTS:
 				case AUDIO_STREAMTYPE_DTSHD:
-					htype = HA_AUDIO_ID_DTSHD;
+				{
+#if defined(HAVE_AVCODEC)
+					HA_FFMPEG_DECODE_OPENCONFIG_S *stConfig = (HA_FFMPEG_DECODE_OPENCONFIG_S*)&u8DecOpenBuf[sizeof(u8DecOpenBuf)-sizeof(HA_FFMPEG_DECODE_OPENCONFIG_S)];
+					HA_FFMPEG_DecGetDefalutOpenConfig(stConfig);
+					/* If avcodec_find_decoder_by_name return NULL the codec not will work. */
+					avcodec_context = avcodec_alloc_context3(avcodec_find_decoder_by_name("dca"));
+					stConfig->hAvCtx = avcodec_context;
+					stAttr.enType = HA_AUDIO_ID_FFMPEG_DECODE;
+					HA_FFMPEGC_DecGetDefalutOpenParam(&stAttr.stDecodeParam, stConfig);
+#else
+					DTSHD_DECODE_OPENCONFIG_S *stConfig = (DTSHD_DECODE_OPENCONFIG_S*)u8DecOpenBuf;
+					HA_DTSHD_DecGetDefalutOpenConfig(stConfig);
+					stAttr.enType = HA_AUDIO_ID_DTSHD;
+					HA_DTSHD_DecGetDefalutOpenParam(&stAttr.stDecodeParam, stConfig);
+					stAttr.stDecodeParam.enDecMode = HD_DEC_MODE_SIMUL;
+#endif
+				}
 				break;
 				case AUDIO_STREAMTYPE_RAW:
 				case AUDIO_STREAMTYPE_LPCM:
-					htype = HA_AUDIO_ID_PCM;
+				{
+					WAV_FORMAT_S *stWavFormat = (WAV_FORMAT_S*)u8DecOpenBuf; /* set pcm wav format here base on pcm file */
+					stWavFormat->nChannels = 1;
+					stWavFormat->nSamplesPerSec = 48000;
+					stWavFormat->wBitsPerSample = 16;
+					stAttr.enType = HA_AUDIO_ID_PCM;
+					HA_PCM_DecGetDefalutOpenParam(&stAttr.stDecodeParam, stWavFormat);
+
+					printf("[INFO] %s: Using PCM Codec with Default Config (nChannels = 1, wBitsPerSample = 16, nSamplesPerSec = 48000, isBigEndian = false)\n", __FUNCTION__);
+				}
 				break;
 				case AUDIO_STREAMTYPE_MP3:
 				case AUDIO_STREAMTYPE_MPEG:
 				default: /* FallBack to MP3 */
-					htype = HA_AUDIO_ID_MP3;
+					stAttr.enType = HA_AUDIO_ID_MP3;
+					HA_MP3_DecGetDefalutOpenParam(&stAttr.stDecodeParam);
+
+					if (type != AUDIO_STREAMTYPE_MP3 && type != AUDIO_STREAMTYPE_MPEG)
+						printf("[ERROR] %s: Unknown Audio Type %d.\n", __FUNCTION__, type);
 				break;
 			}
 
-			if (player->AudioType != htype)
+			if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_ADEC, &stAttr) != HI_SUCCESS)
 			{
-				if (HIADP_AVPlay_SetAdecAttr(player->hPlayer, htype, HD_DEC_MODE_RAWPCM, 0) != HI_SUCCESS)
+				if (file)
+					fclose(file);
+#if defined(HAVE_AVCODEC)
+				if (avcodec_context)
 				{
-					printf("[ERROR] %s: Failed to set Audio Type %d.\n", __FUNCTION__, type);
-					return false;
+					avcodec_free_context(&avcodec_context);
+					avcodec_context = NULL;
 				}
-
-				player->AudioType = htype;
+#endif
+				printf("[ERROR] %s: Failed to set Audio Type %d.\n", __FUNCTION__, type);
+				return false;
 			}
+
+			player->AudioType = stAttr.enType;
 
 			/* Check HDMI OutPut Mode for Re-Apply this. */
 			if (file)
@@ -759,55 +853,66 @@ bool player_set_type(int dev_type, int type)
 				else if (strEquals(s_mode, "passthrough", false))
 					h_mode = HI_UNF_SND_HDMI_MODE_RAW;
 			}
+
 			if (HI_UNF_SND_SetHdmiMode(HI_UNF_SND_0, HI_UNF_SND_OUTPUTPORT_HDMI0, h_mode) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to set HDMI OutPut Mode.\n", __FUNCTION__);
 		}
 		break;
 		case DEV_VIDEO:
 		{
-			HI_UNF_VCODEC_TYPE_E htype;
+			HI_UNF_VCODEC_ATTR_S stAttr;
+
+			if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VDEC, &stAttr) != HI_SUCCESS)
+			{
+				printf("[ERROR] %s: Failed to get Video Attribute for Type %d.\n", __FUNCTION__, type);
+				return false;
+			}
 
 			switch (type)
 			{
 				case VIDEO_STREAMTYPE_MPEG2:
-					htype = HI_UNF_VCODEC_TYPE_MPEG2;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_MPEG2;
 				break;
 				case VIDEO_STREAMTYPE_MPEG4_H264:
-					htype = HI_UNF_VCODEC_TYPE_H264;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_H264;
 				break;
 				case VIDEO_STREAMTYPE_VC1:
 				case VIDEO_STREAMTYPE_VC1_SM:
-					htype = HI_UNF_VCODEC_TYPE_VC1;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_VC1;
 				break;
 				case VIDEO_STREAMTYPE_DIVX4:
 				case VIDEO_STREAMTYPE_DIVX5:
 				case VIDEO_STREAMTYPE_MPEG4_Part2:
-					htype = HI_UNF_VCODEC_TYPE_MPEG4;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_MPEG4;
 				break;
 				case VIDEO_STREAMTYPE_H263:
-					htype = HI_UNF_VCODEC_TYPE_H263;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_H263;
 				break;
 				case VIDEO_STREAMTYPE_DIVX311:
-					htype = HI_UNF_VCODEC_TYPE_DIVX3;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_DIVX3;
 				break;
 				case VIDEO_STREAMTYPE_H265_HEVC:
-					htype = HI_UNF_VCODEC_TYPE_HEVC;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_HEVC;
 				break;
 				case VIDEO_STREAMTYPE_MPEG1:
 				default:
-					htype = HI_UNF_VCODEC_TYPE_MPEG2;
+					stAttr.enType = HI_UNF_VCODEC_TYPE_MPEG2;
 				break;
 			}
 
-			if (player->VideoType == htype)
+			stAttr.enMode      = HI_UNF_VCODEC_MODE_NORMAL;
+			stAttr.u32ErrCover = 100;
+			stAttr.u32Priority = 3;
+
+			if (player->VideoType == stAttr.enType)
 				return true;
-			else if (HIADP_AVPlay_SetVdecAttr(player->hPlayer, htype, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
+			else if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VDEC, &stAttr) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to set Video Type %d.\n", __FUNCTION__, type);
 				return false;
 			}
 
-			player->VideoType = htype;
+			player->VideoType = stAttr.enType;
 		}
 		break;
 	}

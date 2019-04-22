@@ -73,6 +73,73 @@ static unsigned char u8DecOpenBuf[1024];
  *                          libHA.AUDIO.FFMPEG_WMAPRO.decode.so
  *                          libHV.VIDEO.FFMPEG_VDEC.decode.so
  */
+
+/** extradata **/
+#define EXTRADATA_SIZE 14
+#ifndef AV_RB32
+#   define AV_RB32(x)                         \
+    ((((const unsigned char*)(x))[0] << 24) | \
+     (((const unsigned char*)(x))[1] << 16) | \
+     (((const unsigned char*)(x))[2] <<  8) | \
+      ((const unsigned char*)(x))[3])
+#endif
+#ifndef AV_WB32
+#   define AV_WB32(p, d) do {                 \
+        ((unsigned char*)(p))[3] = (d);       \
+        ((unsigned char*)(p))[2] = (d)>>8;    \
+        ((unsigned char*)(p))[1] = (d)>>16;   \
+        ((unsigned char*)(p))[0] = (d)>>24;   \
+    } while(0)
+#endif
+
+/** AVCodecContext **/
+#ifndef AV_RL32
+#   define AV_RL32(x)                         \
+    ((((const unsigned char*)(x))[3] << 24) | \
+     (((const unsigned char*)(x))[2] << 16) | \
+     (((const unsigned char*)(x))[1] <<  8) | \
+      ((const unsigned char*)(x))[0])
+#endif
+#ifndef AV_WL32
+#   define AV_WL32(p, d) do {                 \
+        ((unsigned char*)(p))[0] = (d);       \
+        ((unsigned char*)(p))[1] = (d)>>8;    \
+        ((unsigned char*)(p))[2] = (d)>>16;   \
+        ((unsigned char*)(p))[3] = (d)>>24;   \
+    } while(0)
+#endif
+
+/* Set dummy extradata */
+void avcodec_set_extradata(void *context, int channels, int bit_rate, int sample_rate) {
+	unsigned char *extradata = malloc(EXTRADATA_SIZE);
+
+	if (!context || !extradata) {
+		if (extradata)
+			free(extradata);
+
+		return;
+	}
+
+	/* Set dummy extradata */
+	AV_WB32(extradata,     channels);    // Channels
+	AV_WB32(extradata + 4, bit_rate);    // BitRate
+	AV_WB32(extradata + 8, sample_rate); // SampleRate
+
+	/* Set Extradata in AVCodecContext */
+	AV_WL32(context + 96, (int)extradata);
+	AV_WL32(context + 100, EXTRADATA_SIZE);
+}
+
+void avcodec_set_context_info(void *context, int channels, int bit_rate, int sample_rate) {
+	if (!context)
+		return;
+
+	/* Set Extradata in AVCodecContext */
+	AV_WL32(context + 416, channels);
+	AV_WL32(context +  72, bit_rate);
+	AV_WL32(context + 412, sample_rate);
+}
+
 extern void avcodec_register_all(void);
 extern void *avcodec_find_decoder_by_name(const char *name);
 extern void *avcodec_alloc_context3(void *codec);

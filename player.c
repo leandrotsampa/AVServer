@@ -609,7 +609,7 @@ bool player_create(void)
 	if (HI_UNF_AVPLAY_RegisterEvent(player->hPlayer, HI_UNF_AVPLAY_EVENT_VID_BUF_STATE, (HI_UNF_AVPLAY_EVENT_CB_FN)player_event_handler) != HI_SUCCESS)
 		printf("[WARNING] %s -> Failed to register video buffer event callback.\n", __FUNCTION__);
 
-	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1920, 1080);
+	HI_UNF_DISP_SetVirtualScreen(HI_UNF_DISPLAY1, 1280, 720);
 
 	if (HI_MPI_AVPLAY_GetSyncVdecHandle(player->hPlayer, &player->hVdec, &player->hSync) != HI_SUCCESS)
 		printf("[ERROR] %s: Failed to get Vdec and Sync handler from player.\n", __FUNCTION__);

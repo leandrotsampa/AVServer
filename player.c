@@ -1183,7 +1183,7 @@ bool player_set_display_format(int format)
 bool player_set_fastfoward(int speed)
 {
 	printf("[INFO] %s(%d) -> called.\n", __FUNCTION__, speed);
-	//HI_UNF_AVPLAY_TPLAY_OPT_S stTplayOpts;
+	HI_UNF_VCODEC_MODE_E mode = HI_UNF_VCODEC_MODE_NORMAL;
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -1192,32 +1192,15 @@ bool player_set_fastfoward(int speed)
 		return false;
 	}
 
-	/*pthread_rwlock_rdlock(&player->m_write);
-	if (speed == 0)
-	{
-		if (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, HI_UNF_VCODEC_MODE_NORMAL) != HI_SUCCESS)
-			printf("[ERROR] %s: Failed to set decoding mode.\n", __FUNCTION__);
-		if (HI_UNF_AVPLAY_Resume(player->hPlayer, HI_NULL) != HI_SUCCESS)
-			printf("[ERROR] %s: Failed to resume from FF.", __FUNCTION__);
+	if (speed < 0)
+		mode = HI_UNF_VCODEC_MODE_I;
+	else if (speed > 0)
+		mode = HI_UNF_VCODEC_MODE_IP;
 
-		pthread_rwlock_unlock(&player->m_write);
-		return true;
-	}
-
-	if (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, HI_UNF_VCODEC_MODE_I) != HI_SUCCESS)
+	pthread_rwlock_rdlock(&player->m_write);
+	if (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, mode) != HI_SUCCESS)
 		printf("[ERROR] %s: Failed to set decoding mode.\n", __FUNCTION__);
-
-	stTplayOpts.enTplayDirect = (speed < 0) ? HI_UNF_AVPLAY_TPLAY_DIRECT_BACKWARD : HI_UNF_AVPLAY_TPLAY_DIRECT_FORWARD;
-	stTplayOpts.u32SpeedInteger = abs(speed);
-	stTplayOpts.u32SpeedDecimal = 0;
-	if (HI_UNF_AVPLAY_Tplay(player->hPlayer, &stTplayOpts) != HI_SUCCESS)
-	{
-		printf("[ERROR] %s: Failed to set speed to %d.\n", __FUNCTION__, speed);
-		pthread_rwlock_unlock(&player->m_write);
-		return false;
-	}
-
-	pthread_rwlock_unlock(&player->m_write);*/
+	pthread_rwlock_unlock(&player->m_write);
 	return true;
 }
 

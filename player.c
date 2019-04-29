@@ -1194,7 +1194,7 @@ bool player_set_fastfoward(int speed)
 
 	if (speed < 0)
 		mode = HI_UNF_VCODEC_MODE_I;
-	else if (speed > 0)
+	else if (speed > 1)
 		mode = HI_UNF_VCODEC_MODE_IP;
 
 	pthread_rwlock_rdlock(&player->m_write);

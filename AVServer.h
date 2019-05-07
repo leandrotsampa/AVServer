@@ -36,6 +36,7 @@ struct class_ops {
 	bool (*set_mode)(int);
 	bool (*set_blank)(bool);
 	bool (*set_format)(int);
+	bool (*set_framerate)(int);
 	bool (*set_disp_format)(int);
 	bool (*set_fastfoward)(int);
 	bool (*set_slowmotion)(int);

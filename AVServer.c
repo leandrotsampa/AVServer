@@ -39,6 +39,8 @@
 #define DVR_DEV		"dvr"
 #define PAINEL_DEV	"panel"
 
+#define VIDEO_SET_FRAME_RATE _IO('o', 99)
+
 static unsigned dvb_hisi_open_mask;
 
 enum {
@@ -442,6 +444,11 @@ static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct 
 			printf("%s: VIDEO_GET_FRAME_RATE\n", __FUNCTION__);
 
 			return player->get_framerate((unsigned int *)data) - 1;
+		break;
+		case VIDEO_SET_FRAME_RATE:
+			printf("%s: VIDEO_SET_FRAME_RATE\n", __FUNCTION__);
+
+			return player->set_framerate((int)(intptr_t)arg) - 1;
 		break;
 		case VIDEO_GET_PTS:
 			return player->get_pts(DEV_VIDEO, (long long *)data) - 1;

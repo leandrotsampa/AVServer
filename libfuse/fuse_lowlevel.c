@@ -2808,7 +2808,7 @@ restart:
 	return res;
 }
 
-#define KERNEL_BUF_PAGES 32
+#define KERNEL_BUF_PAGES 3072
 
 /* room needed in buffer to accommodate header */
 #define HEADER_SIZE 0x1000

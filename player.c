@@ -52,6 +52,8 @@
 #define VIDEO_STREAMTYPE_VC1_SM		 5
 #define VIDEO_STREAMTYPE_MPEG1		 6
 #define VIDEO_STREAMTYPE_H265_HEVC	 7
+#define VIDEO_STREAMTYPE_VP8		 8
+#define VIDEO_STREAMTYPE_VP9		 9
 #define VIDEO_STREAMTYPE_XVID		 10
 #define VIDEO_STREAMTYPE_DIVX311	 13
 #define VIDEO_STREAMTYPE_DIVX4		 14
@@ -534,7 +536,7 @@ bool player_create(void)
 	}
 
 	OpenOpt.enDecType  = HI_UNF_VCODEC_DEC_TYPE_NORMAL;
-	OpenOpt.enCapLevel = HI_UNF_VCODEC_CAP_LEVEL_FULLHD;
+	OpenOpt.enCapLevel = HI_UNF_VCODEC_CAP_LEVEL_4096x2160;
 	OpenOpt.enProtocolLevel = HI_UNF_VCODEC_PRTCL_LEVEL_H264;
 	if (HI_UNF_AVPLAY_ChnOpen(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, &OpenOpt) != HI_SUCCESS)
 	{
@@ -750,11 +752,15 @@ bool player_clear(int dev_type)
 	{
 		case DEV_AUDIO:
 			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
-				printf("[ERROR] %s: Failed to Reset player.\n", __FUNCTION__);
+				printf("[ERROR-AUD] %s: Failed to Reset player.\n", __FUNCTION__);
 
 			player->AudioBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
 		break;
 		case DEV_VIDEO:
+			if (player->AudioState == 0)
+				if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
+					printf("[ERROR-VID] %s: Failed to Reset player.\n", __FUNCTION__);
+
 			player->VideoBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
 		break;
 	}
@@ -937,6 +943,7 @@ bool player_set_type(int dev_type, int type)
 
 			switch (type)
 			{
+				case VIDEO_STREAMTYPE_MPEG1:
 				case VIDEO_STREAMTYPE_MPEG2:
 					stAttr.enType = HI_UNF_VCODEC_TYPE_MPEG2;
 				break;
@@ -961,9 +968,20 @@ bool player_set_type(int dev_type, int type)
 				case VIDEO_STREAMTYPE_H265_HEVC:
 					stAttr.enType = HI_UNF_VCODEC_TYPE_HEVC;
 				break;
-				case VIDEO_STREAMTYPE_MPEG1:
+				case VIDEO_STREAMTYPE_VP8:
+					stAttr.enType = HI_UNF_VCODEC_TYPE_VP8;
+				break;
+				case VIDEO_STREAMTYPE_VP9:
+					stAttr.enType = HI_UNF_VCODEC_TYPE_VP9;
+				break;
 				default:
-					stAttr.enType = HI_UNF_VCODEC_TYPE_MPEG2;
+					if (type > HI_UNF_VCODEC_TYPE_BUTT)
+						stAttr.enType = type - HI_UNF_VCODEC_TYPE_BUTT;
+					else
+					{
+						printf("[ERROR] %s: The Video Type %d is Unknown.\n", __FUNCTION__, type);
+						return false;
+					}
 				break;
 			}
 
@@ -1160,6 +1178,29 @@ bool player_set_format(int format)
 	}
 
 	player->VideoFormat = format;
+
+	return true;
+}
+
+bool player_set_framerate(int framerate)
+{
+	HI_UNF_AVPLAY_FRMRATE_PARAM_S stFrmRateAttr;
+	struct s_player *player = (struct s_player *)player_ops.priv;
+
+	if (!(player && player->IsCreated))
+	{
+		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
+		return false;
+	}
+
+	stFrmRateAttr.enFrmRateType = (framerate > 0) ? HI_UNF_AVPLAY_FRMRATE_TYPE_USER : HI_UNF_AVPLAY_FRMRATE_TYPE_PTS;
+	stFrmRateAttr.stSetFrmRate.u32fpsInteger = framerate;
+	stFrmRateAttr.stSetFrmRate.u32fpsDecimal = 0;
+	if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_FRMRATE_PARAM, &stFrmRateAttr) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> Failed to set FrameRate %d.\n", __FUNCTION__, framerate);
+		return false;
+	}
 
 	return true;
 }
@@ -1949,15 +1990,24 @@ int player_write(int dev_type, const char *buf, size_t size)
 
 	if (h == 0x00 && e == 0x00 && a == 0x01 && d >= c_s && d <= c_e)
 		IsHeader = true;
+	else if (h == 0x53 && e == 0x50 && a == 0x54 && d == 0x53) /* PTS Header "SPTS" */
+	{
+		HI_U32 PTSLow = (((buf[4] & 0x06) >> 1) << 30)
+				| ((buf[5]) << 22)
+				| (((buf[6] & 0xfe) >> 1) << 15)
+				| ((buf[7]) << 7)
+				| (((buf[8] & 0xfe)) >> 1);
+
+		player->p2e[dev_type].pts = (PTSLow / 90);
+		return size;
+	}
 
 	/* Extract PTS from header. */
 	if (IsHeader)
 	{
 		if ((buf[7] & 0x80) >> 7) /* PTS */
 		{
-			HI_U32 PTSLow = 0;
-
-			PTSLow = (((buf[9] & 0x06) >> 1) << 30)
+			HI_U32 PTSLow = (((buf[9] & 0x06) >> 1) << 30)
 					| ((buf[10]) << 22)
 					| (((buf[11] & 0xfe) >> 1) << 15)
 					| ((buf[12]) << 7)
@@ -2050,6 +2100,7 @@ struct class_ops *player_get_ops(void)
 	player_ops.set_mode			= player_set_mode;
 	player_ops.set_blank		= player_set_blank;
 	player_ops.set_format		= player_set_format;
+	player_ops.set_framerate	= player_set_framerate;
 	player_ops.set_disp_format	= player_set_display_format;
 	player_ops.set_fastfoward	= player_set_fastfoward;
 	player_ops.set_slowmotion	= player_set_slowmotion;

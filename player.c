@@ -742,7 +742,7 @@ bool player_clear(int dev_type)
 	}
 
 	pthread_rwlock_rdlock(&player->m_write);
-	if (player->IsPES)
+	if (player->IsPES && (player->AudioState != 0 || player->VideoState != 0))
 		if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
 			printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
 

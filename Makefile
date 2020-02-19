@@ -21,8 +21,11 @@ CFLAGS += -DHI_HDMI_RX_INSIDE
 endif
 
 CFLAGS += -I$(HI_INCLUDE_DIR) \
+          -I$(COMMON_DIR)/include \
+          -I$(COMPONENT_DIR)/ha_codec/include \
           -I$(MSP_DIR)/include \
           -I$(MSP_DIR)/api/include \
+          -I$(MSP_DIR)/api/higo/include \
           -I$(MSP_DIR)/drv/include \
           -I$(SAMPLE_DIR)/common \
           -I$(SRC_DIR)/include \

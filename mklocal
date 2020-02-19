@@ -24,14 +24,16 @@ CFLAGS += -DHI_HDMI_RX_INSIDE
 endif
 
 CFLAGS += -I$(HI_INCLUDE_DIR) \
+          -I$(COMMON_DIR)/include \
+          -I$(COMPONENT_DIR)/ha_codec/include \
           -I$(MSP_DIR)/include \
           -I$(MSP_DIR)/api/include \
+          -I$(MSP_DIR)/api/higo/include \
           -I$(MSP_DIR)/drv/include \
           -I$(SAMPLE_DIR)/common \
           -I$(SRC_DIR)/include \
           -I$(SRC_DIR)/libfuse \
-          -I$(SRC_DIR) \
-		  -I/media/20e9d16c-f6a2-477e-a886-9bb56c0c55a8/1TB/nfs/debian-arm/usr/include
+          -I$(SRC_DIR)
 
 SYS_LIBS := -lc -lpthread -lrt -lstdc++ -ldl
 HI_LIBS := -ljpeg -lhi_common -lpng -lhigo -lhigoadp -lhi_msp -lhi_resampler -lz -lfreetype -lhi_subtitle -lhi_so -lhi_ttx -lhi_cc

@@ -144,10 +144,7 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi) {
 					fi->fh = open(filename, O_WRONLY);
 					player->set_dvr(true);
 				} else if (type == DVB_VIDEO_DEV) {
-					if (!player->set_output(true)) {
-						dvb_hisi_open_mask &= ~(1 << type);
-						return -EBUSY;
-					}
+					player->set_output(true);
 				}
 			break;
 			default:

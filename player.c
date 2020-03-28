@@ -493,6 +493,12 @@ bool player_create(void)
 		goto DISP_DEINIT;
 	}
 
+	if (HIADP_VO_CreatWin(HI_NULL, &player->hWindow) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HIADP_VO_CreatWin failed.\n", __FUNCTION__);
+		goto VO_DEINIT;
+	}
+
 	if (HI_UNF_DMX_Init() != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_DMX_Init failed.\n", __FUNCTION__);
@@ -559,16 +565,22 @@ bool player_create(void)
 		goto VCHN_CLOSE;
 	}
 
+	if (HI_UNF_VO_AttachWindow(player->hWindow, player->hPlayer) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_VO_AttachWindow failed.\n", __FUNCTION__);
+		goto ACHN_CLOSE;
+	}
+
 	if (HI_UNF_SND_GetDefaultTrackAttr(HI_UNF_SND_TRACK_TYPE_MASTER, &stTrackAttr) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_SND_GetDefaultTrackAttr failed.\n", __FUNCTION__);
-		goto ACHN_CLOSE;
+		goto WIN_DETACH;
 	}
 
 	if (HI_UNF_SND_CreateTrack(HI_UNF_SND_0, &stTrackAttr, &player->hTrack) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_SND_CreateTrack failed.\n", __FUNCTION__);
-		goto ACHN_CLOSE;
+		goto WIN_DETACH;
 	}
 
 	if (HI_UNF_SND_Attach(player->hTrack, player->hPlayer) != HI_SUCCESS)
@@ -652,6 +664,9 @@ SND_DETACH:
 	HI_UNF_SND_Detach(player->hTrack, player->hPlayer);
 TRACK_DESTROY:
 	HI_UNF_SND_DestroyTrack(player->hTrack);
+WIN_DETACH:
+	HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
+	HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
 ACHN_CLOSE:
 	HI_UNF_AVPLAY_ChnClose(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD);
 VCHN_CLOSE:
@@ -664,6 +679,7 @@ DMX_DEINIT:
 	HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
 	HI_UNF_DMX_DeInit();
 VO_DEINIT:
+	HI_UNF_VO_DestroyWindow(player->hWindow);
 	HIADP_VO_DeInit();
 DISP_DEINIT:
 	HIADP_Disp_DeInit();
@@ -705,12 +721,16 @@ void player_destroy(void)
 		HI_UNF_SND_Detach(player->hTrack, player->hPlayer);
 		HI_UNF_SND_DestroyTrack(player->hTrack);
 
+		HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
+		HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
+
 		HI_UNF_AVPLAY_Destroy(player->hPlayer);
 		HI_UNF_AVPLAY_DeInit();
 
 		HI_UNF_DMX_DetachTSPort(PLAYER_DEMUX_PORT);
 		HI_UNF_DMX_DeInit();
 
+		HI_UNF_VO_DestroyWindow(player->hWindow);
 		HIADP_VO_DeInit();
 
 		HIADP_Disp_DeInit();
@@ -780,42 +800,15 @@ void player_set_dvr(bool status)
 		player->IsDVR = status;
 }
 
-bool player_set_output(bool enabled)
+void player_set_output(bool enabled)
 {
 	printf("[INFO] %s(%s) -> called.\n", __FUNCTION__, enabled ? "true" : "false");
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
-	if (!(player && player->IsCreated)) {
+	if (!(player && player->IsCreated))
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
-		return false;
-	}
-
-	if (enabled) {
-		if (HIADP_VO_CreatWin(HI_NULL, &player->hWindow) != HI_SUCCESS)
-		{
-			printf("[ERROR] %s -> HIADP_VO_CreatWin failed.\n", __FUNCTION__);
-			return false;
-		}
-		if (HI_UNF_VO_AttachWindow(player->hWindow, player->hPlayer) != HI_SUCCESS)
-		{
-			printf("[ERROR] %s -> HI_UNF_VO_AttachWindow failed.\n", __FUNCTION__);
-			HI_UNF_VO_DestroyWindow(player->hWindow);
-			return false;
-		}
-		if (HI_UNF_VO_SetWindowEnable(player->hWindow, HI_TRUE) != HI_SUCCESS)
-		{
-			printf("[ERROR] %s -> HI_UNF_VO_SetWindowEnable to true failed.\n", __FUNCTION__);
-			HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
-			HI_UNF_VO_DestroyWindow(player->hWindow);
-			return false;
-		}
-	} else {
-		HI_UNF_VO_SetWindowEnable(player->hWindow, HI_FALSE);
-		HI_UNF_VO_DetachWindow(player->hWindow, player->hPlayer);
-		HI_UNF_VO_DestroyWindow(player->hWindow);
-	}
-
-	return true;
+	else
+		HI_UNF_VO_SetWindowEnable(player->hWindow, enabled ? HI_TRUE : HI_FALSE);
 }
 
 bool player_set_type(int dev_type, int type)

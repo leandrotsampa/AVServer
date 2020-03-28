@@ -571,6 +571,12 @@ bool player_create(void)
 		goto ACHN_CLOSE;
 	}
 
+	if (HI_UNF_VO_SetWindowEnable(player->hWindow, HI_TRUE) != HI_SUCCESS)
+	{
+		printf("[ERROR] %s -> HI_UNF_VO_SetWindowEnable failed.\n", __FUNCTION__);
+		goto WIN_DETACH;
+	}
+
 	if (HI_UNF_SND_GetDefaultTrackAttr(HI_UNF_SND_TRACK_TYPE_MASTER, &stTrackAttr) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> HI_UNF_SND_GetDefaultTrackAttr failed.\n", __FUNCTION__);
@@ -798,17 +804,6 @@ void player_set_dvr(bool status)
 		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
 	else
 		player->IsDVR = status;
-}
-
-void player_set_output(bool enabled)
-{
-	printf("[INFO] %s(%s) -> called.\n", __FUNCTION__, enabled ? "true" : "false");
-	struct s_player *player = (struct s_player *)player_ops.priv;
-
-	if (!(player && player->IsCreated))
-		printf("[ERROR] %s -> The Player it's not created.\n", __FUNCTION__);
-	else
-		HI_UNF_VO_SetWindowEnable(player->hWindow, enabled ? HI_TRUE : HI_FALSE);
 }
 
 bool player_set_type(int dev_type, int type)
@@ -2118,7 +2113,6 @@ struct class_ops *player_get_ops(void)
 	player_ops.destroy			= player_destroy;
 	player_ops.clear			= player_clear;
 	player_ops.set_dvr			= player_set_dvr;
-	player_ops.set_output		= player_set_output;
 	player_ops.set_type			= player_set_type;
 	player_ops.set_pid			= player_set_pid;
 	player_ops.set_mode			= player_set_mode;

@@ -143,8 +143,6 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi) {
 					snprintf(filename, sizeof(filename), "/dev/dvb/adapter%c/dvr0", path[(strlen(path)-1)]);
 					fi->fh = open(filename, O_WRONLY);
 					player->set_dvr(true);
-				} else if (type == DVB_VIDEO_DEV) {
-					player->set_output(true);
 				}
 			break;
 			default:
@@ -176,10 +174,9 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi) {
 
 				if (type == DVB_AUDIO_DEV && player)
 					player->stop(DEV_AUDIO);
-				else if (type == DVB_VIDEO_DEV && player) {
+				else if (type == DVB_VIDEO_DEV && player)
 					player->stop(DEV_VIDEO);
-					player->set_output(false);
-				} else if (type == DVB_DVR_DEV) {
+				else if (type == DVB_DVR_DEV) {
 					if (fi->fh >= 0)
 						close(fi->fh);
 

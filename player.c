@@ -160,7 +160,6 @@ struct s_player {
 	int VideoState;		/* 0 stoped, 1 playing, 2 freezed */
 	int VideoFormat;	/* 0 4:3, 1 16:9, 2 2.21:1 */
 	int DisplayFormat;	/* 0 Pan&Scan, 1 Letterbox, 2 Center Cut Out */
-	int VideoFrameRate;
 
 	bool IsPES;
 	bool IsDVR;
@@ -300,16 +299,6 @@ int player_event_handler(HI_HANDLE handle, HI_UNF_AVPLAY_EVENT_E enEvent, HI_VOI
 			framerate = (vFrame->stFrameRate.u32fpsInteger * 100 + vFrame->stFrameRate.u32fpsDecimal / 10) * 2;
 		else
 			framerate = vFrame->stFrameRate.u32fpsInteger * 100 + vFrame->stFrameRate.u32fpsDecimal / 10;
-
-		/** Check FrameRate and Back to Auto **/
-		if (player->VideoFrameRate > 0 && player->VideoFrameRate != framerate)
-		{
-			HI_UNF_VCODEC_ATTR_S stVDecAttr;
-			if (HI_UNF_AVPLAY_GetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_VDEC, &stVDecAttr) == HI_SUCCESS)
-				if (stVDecAttr.enMode == HI_UNF_VCODEC_MODE_NORMAL)
-					player_ops.set_framerate(0);
-		}
-
 		framerate *= 10; // Fix for Enigma2
 
 		/** VIDEO_EVENT_PROGRESSIVE_CHANGED **/
@@ -652,7 +641,6 @@ bool player_create(void)
 	player->VideoState		= 0;
 	player->VideoFormat		= 1;
 	player->DisplayFormat	= 0;
-	player->VideoFrameRate	= 0;
 	player->IsBlank			= true;
 	player->IsSyncEnabled	= true;
 	player->IsMute			= false;
@@ -1210,16 +1198,14 @@ bool player_set_framerate(int framerate)
 	}
 
 	stFrmRateAttr.enFrmRateType = (framerate > 0) ? HI_UNF_AVPLAY_FRMRATE_TYPE_USER : HI_UNF_AVPLAY_FRMRATE_TYPE_PTS;
-	stFrmRateAttr.stSetFrmRate.u32fpsInteger = (framerate > 0) ? framerate / 100 : 0;
-	stFrmRateAttr.stSetFrmRate.u32fpsDecimal = (framerate > 0) ? (framerate % 100) * 10 : 0;
+	stFrmRateAttr.stSetFrmRate.u32fpsInteger = (framerate > 0) ? framerate / 1000 : 0;
+	stFrmRateAttr.stSetFrmRate.u32fpsDecimal = (framerate > 0) ? framerate % 1000 : 0;
 	if (HI_UNF_AVPLAY_SetAttr(player->hPlayer, HI_UNF_AVPLAY_ATTR_ID_FRMRATE_PARAM, &stFrmRateAttr) != HI_SUCCESS)
 	{
 		printf("[ERROR] %s -> Failed to set FrameRate: %d.%d\n", __FUNCTION__, stFrmRateAttr.stSetFrmRate.u32fpsInteger, stFrmRateAttr.stSetFrmRate.u32fpsDecimal / 10);
 		return false;
 	}
 
-	printf("[INFO] %s -> Set FrameRate: %d.%d\n", __FUNCTION__, stFrmRateAttr.stSetFrmRate.u32fpsInteger, (framerate > 0) ? stFrmRateAttr.stSetFrmRate.u32fpsDecimal / 10 : 0);
-	player->VideoFrameRate = framerate;
 	return true;
 }
 

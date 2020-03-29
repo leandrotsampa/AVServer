@@ -746,10 +746,10 @@ bool player_clear(int dev_type)
 	}
 
 	pthread_rwlock_rdlock(&player->m_write);
-	if (player->IsPES && (player->AudioState != 0 || player->VideoState != 0))
+/*	if (player->IsPES && (player->AudioState != 0 || player->VideoState != 0))
 		if (HI_UNF_AVPLAY_FlushStream(player->hPlayer, HI_NULL) != HI_SUCCESS)
 			printf("[ERROR] %s: Failed to Flush buffer.\n", __FUNCTION__);
-
+*/
 	/** Remove poll from waiting state. **/
 	pthread_mutex_lock(&player->m_poll);
 	switch (dev_type)
@@ -1243,6 +1243,10 @@ bool player_set_fastfoward(int speed)
 		mode = HI_UNF_VCODEC_MODE_IP;
 
 	pthread_rwlock_rdlock(&player->m_write);
+	if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_UNF_AVPLAY_STATUS_TPLAY) != HI_SUCCESS)
+		printf("[ERROR] %s: Failed to change audio to TPLAY status.\n", __FUNCTION__);
+	if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, HI_UNF_AVPLAY_STATUS_TPLAY) != HI_SUCCESS)
+		printf("[ERROR] %s: Failed to change audio to TPLAY status.\n", __FUNCTION__);
 	if (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, mode) != HI_SUCCESS)
 		printf("[ERROR] %s: Failed to set decoding mode.\n", __FUNCTION__);
 	pthread_rwlock_unlock(&player->m_write);
@@ -1343,6 +1347,8 @@ bool player_pause(int dev_type)
 				return true;
 
 			pthread_rwlock_rdlock(&player->m_write);
+			if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_UNF_AVPLAY_STATUS_PAUSE) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change audio to PAUSE status.\n", __FUNCTION__);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to stop sync Audio.\n", __FUNCTION__);
 			if (HI_MPI_AO_Track_Pause(player->hTrack) != HI_SUCCESS)
@@ -1361,6 +1367,8 @@ bool player_pause(int dev_type)
 				return true;
 
 			pthread_rwlock_rdlock(&player->m_write);
+			if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, HI_UNF_AVPLAY_STATUS_PAUSE) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change video to PAUSE status.\n", __FUNCTION__);
 			if (HI_MPI_SYNC_Stop(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to stop sync Video.\n", __FUNCTION__);
 			if (HI_MPI_WIN_Pause(player->hWindow, HI_TRUE) != HI_SUCCESS)
@@ -1369,8 +1377,6 @@ bool player_pause(int dev_type)
 				pthread_rwlock_unlock(&player->m_write);
 				return false;
 			}
-			if (HI_MPI_WIN_Freeze(player->hWindow, HI_TRUE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
-				printf("[ERROR] %s: Failed to freeze Video.\n", __FUNCTION__);
 
 			player->VideoState = 2;
 			pthread_rwlock_unlock(&player->m_write);
@@ -1403,6 +1409,8 @@ bool player_resume(int dev_type)
 				return false;
 
 			pthread_rwlock_rdlock(&player->m_write);
+			if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_UNF_AVPLAY_STATUS_PLAY) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change audio to RESUME status.\n", __FUNCTION__);
 			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_AUD) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to start sync Audio.\n", __FUNCTION__);
 			if (HI_MPI_AO_Track_Resume(player->hTrack) != HI_SUCCESS)
@@ -1423,10 +1431,10 @@ bool player_resume(int dev_type)
 				return false;
 
 			pthread_rwlock_rdlock(&player->m_write);
+			if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_VID, HI_UNF_AVPLAY_STATUS_PLAY) != HI_SUCCESS)
+				printf("[ERROR] %s: Failed to change audio to RESUME status.\n", __FUNCTION__);
 			if (HI_MPI_SYNC_Start(player->hSync, SYNC_CHAN_VID) != HI_SUCCESS)
 				printf("[ERROR] %s: Failed to start sync Video.\n", __FUNCTION__);
-			if (HI_MPI_WIN_Freeze(player->hWindow, HI_FALSE, HI_DRV_WIN_SWITCH_LAST) != HI_SUCCESS)
-				printf("[ERROR] %s: Failed to unfreeze Video.\n", __FUNCTION__);
 			if (HI_MPI_WIN_Pause(player->hWindow, HI_FALSE) != HI_SUCCESS)
 			{
 				printf("[ERROR] %s: Failed to resume Video.\n", __FUNCTION__);

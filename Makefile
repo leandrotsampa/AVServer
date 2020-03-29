@@ -21,7 +21,10 @@ CFLAGS += -DHI_HDMI_RX_INSIDE
 endif
 
 CFLAGS += -I$(HI_INCLUDE_DIR) \
+          -Iavplay \
           -I$(COMMON_DIR)/include \
+          -I$(COMMON_DIR)/api/include \
+          -I$(COMMON_DIR)/drv/include \
           -I$(COMPONENT_DIR)/ha_codec/include \
           -I$(MSP_DIR)/include \
           -I$(MSP_DIR)/api/include \
@@ -46,6 +49,12 @@ VERSION := \"$(shell date "+%Y.%m-%d (Build: %H%M%S)")\"
 LOCAL_SRCS := AVServer.c \
               player.c \
 			  string_ext.c
+
+LOCAL_SRCS += avplay/mpi_avplay.c \
+			  avplay/unf_avplay.c \
+			  avplay/avplay_frc.c \
+			  avplay/frame_detect.c \
+			  avplay/bitstream.c
 
 CFLAGS         += -DHAVE_AVCODEC
 HI_DEPEND_LIBS += -l:libavcodec.so.56

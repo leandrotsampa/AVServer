@@ -9,7 +9,8 @@ endif
 SRC_DIR := $(CURDIR)
 
 # FIX: Change this to set local libs or you can compile SDK libs.
-HI_LOCAL_LIB_DIR := ./
+#CFG_HI_ARM_TOOLCHAINS_NAME := arm-linux-gnueabi
+#HI_LOCAL_LIB_DIR := /opt/HiSTBLinuxV100R005C00SPC030/libs
 
 CFLAGS := -Wl,--unresolved-symbols=ignore-in-shared-libs -Wall -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -D_FILE_OFFSET_BITS=64
 CFLAGS += -DCHIP_TYPE_$(CFG_HI_CHIP_TYPE) -DCFG_HI_SDK_VERSION=$(CFG_HI_SDK_VERSION)
@@ -24,7 +25,10 @@ CFLAGS += -DHI_HDMI_RX_INSIDE
 endif
 
 CFLAGS += -I$(HI_INCLUDE_DIR) \
+          -Iavplay \
           -I$(COMMON_DIR)/include \
+          -I$(COMMON_DIR)/api/include \
+          -I$(COMMON_DIR)/drv/include \
           -I$(COMPONENT_DIR)/ha_codec/include \
           -I$(MSP_DIR)/include \
           -I$(MSP_DIR)/api/include \
@@ -49,6 +53,12 @@ VERSION := \"$(shell date "+%Y.%m-%d (Build: %H%M%S)")\"
 LOCAL_SRCS := AVServer.c \
               player.c \
 			  string_ext.c
+
+LOCAL_SRCS += avplay/mpi_avplay.c \
+			  avplay/unf_avplay.c \
+			  avplay/avplay_frc.c \
+			  avplay/frame_detect.c \
+			  avplay/bitstream.c
 
 CFLAGS         += -DHAVE_AVCODEC
 HI_DEPEND_LIBS += -l:libavcodec.so.56

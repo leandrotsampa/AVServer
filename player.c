@@ -1241,6 +1241,8 @@ bool player_set_fastfoward(int speed)
 		mode = HI_UNF_VCODEC_MODE_I;
 	else if (speed > 1)
 		mode = HI_UNF_VCODEC_MODE_IP;
+	else
+		return (HI_UNF_AVPLAY_SetDecodeMode(player->hPlayer, mode) == HI_SUCCESS);
 
 	pthread_rwlock_rdlock(&player->m_write);
 	if (HI_MPI_AVPLAY_ChangeStatus(player->hPlayer, HI_UNF_AVPLAY_MEDIA_CHAN_AUD, HI_UNF_AVPLAY_STATUS_TPLAY) != HI_SUCCESS)

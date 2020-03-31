@@ -1237,7 +1237,7 @@ bool player_set_fastfoward(int speed)
 		return false;
 	}
 
-	if (speed < 0)
+	if (speed < 0 || (player->IsTimeShift && speed == 1))
 		mode = HI_UNF_VCODEC_MODE_I;
 	else if (speed > 1)
 		mode = HI_UNF_VCODEC_MODE_IP;

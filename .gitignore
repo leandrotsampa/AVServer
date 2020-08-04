@@ -3,3 +3,10 @@ AVServer
 
 # Local Makefile
 mklocal
+
+# Version file
+version.h
+
+# Other's
+*.diff
+*.patch

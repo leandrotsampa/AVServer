@@ -73,7 +73,6 @@ static void *dvb_hisi_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 	(void) cfg;
 	struct class_ops *player = player_get_ops();
 
-	printf("%s -> Called.\n", __FUNCTION__);
 	if (player && player->create())
 		return player;
 
@@ -83,7 +82,6 @@ static void *dvb_hisi_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 static void dvb_hisi_destroy(void *private_data) {
 	struct class_ops *player = (struct class_ops *)private_data;
 
-	printf("%s -> Called.\n", __FUNCTION__);
 	if (player)
 		player->destroy();
 }
@@ -226,7 +224,6 @@ static int dvb_hisi_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	(void) fi;
 	(void) flags;
 
-	printf("%s -> Called.\n", __FUNCTION__);
 	if (dvb_hisi_file_type(path) != DVB_ROOT)
 		return -ENOENT;
 

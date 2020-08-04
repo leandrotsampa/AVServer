@@ -399,24 +399,3 @@ HI_S32 HI_UNF_AVPLAY_Invoke(HI_HANDLE hAvplay, HI_UNF_AVPLAY_INVOKE_E enInvokeTy
 
     return s32Ret;
 }
-
-HI_S32 HI_UNF_AVPLAY_AcqUserData(HI_HANDLE hAvplay, HI_UNF_VIDEO_USERDATA_S *pstUserData, HI_UNF_VIDEO_USERDATA_TYPE_E *penType)
-{
-    HI_S32 s32Ret;
-
-    s32Ret = HI_MPI_AVPLAY_AcqUserData(hAvplay, pstUserData, penType);
-
-    return s32Ret;
-}
-
-HI_S32 HI_UNF_AVPLAY_RlsUserData(HI_HANDLE hAvplay, HI_UNF_VIDEO_USERDATA_S* pstUserData)
-{
-    HI_S32 s32Ret;
-
-    s32Ret = HI_MPI_AVPLAY_RlsUserData(hAvplay, pstUserData);
-
-    return s32Ret;
-}
-
-
-

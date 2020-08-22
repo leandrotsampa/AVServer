@@ -1891,16 +1891,13 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 
 int player_write(int dev_type, const char *buf, size_t size)
 {
+	int pos;
 	bool IsHeader;
 	unsigned char c_s;
 	unsigned char c_e;
 	HI_UNF_STREAM_BUF_S sBuf;
 	HI_UNF_AVPLAY_BUFID_E bID;
 	size_t pSize = size;
-	unsigned char h = buf[0];
-	unsigned char e = buf[1];
-	unsigned char a = buf[2];
-	unsigned char d = buf[3];
 	struct s_player *player = (struct s_player *)player_ops.priv;
 
 	if (!(player && player->IsCreated))
@@ -2002,9 +1999,19 @@ int player_write(int dev_type, const char *buf, size_t size)
 		break;
 	}
 
-	if (h == 0x00 && e == 0x00 && a == 0x01 && d >= c_s && d <= c_e)
+	if (size <= 5)
+		return size;
+	if (buf[0] == 0x00 && buf[1] == 0x00 && buf[2] == 0x01 && buf[3] >= c_s && buf[3] <= c_e)
+	{
+		pos = 0;
 		IsHeader = true;
-	else if (h == 0x53 && e == 0x50 && a == 0x54 && d == 0x53) /* PTS Header "SPTS" */
+	}
+	else if (buf[0] == 0x00 && buf[1] == 0x00 && buf[2] == 0x00 && buf[3] == 0x01 && buf[4] >= c_s && buf[4] <= c_e)
+	{
+		pos = 1;
+		IsHeader = true;
+	}
+	else if (buf[0] == 0x53 && buf[1] == 0x50 && buf[2] == 0x54 && buf[3] == 0x53) /* PTS Header "SPTS" */
 	{
 		HI_U32 PTSLow = (((buf[4] & 0x06) >> 1) << 30)
 				| ((buf[5]) << 22)
@@ -2019,15 +2026,15 @@ int player_write(int dev_type, const char *buf, size_t size)
 	/* Extract PTS from header. */
 	if (IsHeader)
 	{
-		if ((buf[7] & 0x80) >> 7) /* PTS */
+		if ((buf[pos + 7] & 0x80) >> 7) /* PTS */
 		{
-			HI_U32 PTSLow = (((buf[9] & 0x06) >> 1) << 30)
-					| ((buf[10]) << 22)
-					| (((buf[11] & 0xfe) >> 1) << 15)
-					| ((buf[12]) << 7)
-					| (((buf[13] & 0xfe)) >> 1);
+			HI_U32 PTSLow = (((buf[pos + 9] & 0x06) >> 1) << 30)
+					| ((buf[pos + 10]) << 22)
+					| (((buf[pos + 11] & 0xfe) >> 1) << 15)
+					| ((buf[pos + 12]) << 7)
+					| (((buf[pos + 13] & 0xfe)) >> 1);
 
-			if (buf[9] & 0x08)
+			if (buf[pos + 9] & 0x08)
 				player->p2e[dev_type].pts = (PTSLow / 90) + 0x2D82D82; //(1 << 32) / 90;
 			else
 				player->p2e[dev_type].pts = (PTSLow / 90);
@@ -2044,7 +2051,7 @@ int player_write(int dev_type, const char *buf, size_t size)
 			 * Sometimes the Header contains ES data too.
 			 * And because of this, is necessary save header for check in next step.
 			 */
-			player->p2e[dev_type].es_size = (((buf[4]<<8) | buf[5]) + 6) - (9 + buf[8]);
+			player->p2e[dev_type].es_size = (((buf[pos + 4]<<8) | buf[pos + 5]) + 6) - (9 + buf[pos + 8]);
 			if (player->p2e[dev_type].es_size < 0)
 				player->p2e[dev_type].es_size = 0; /* The ES size is big, and not have data in header. */
 

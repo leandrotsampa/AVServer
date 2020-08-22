@@ -38,10 +38,14 @@
 #define VIDEO_DEV	"video0"
 #define DVR_DEV		"dvr"
 #define PAINEL_DEV	"panel"
+#define ENCODER_DEV	"encoder"
 
 #define VIDEO_SET_FRAME_RATE _IO('o', 99)
 
 static unsigned dvb_hisi_open_mask;
+
+#define MAX_ENCODERS 3
+static struct encoder_ops *encoders[MAX_ENCODERS];
 
 enum {
 	DVB_NONE,
@@ -51,6 +55,7 @@ enum {
 	DVB_VIDEO_DEV,
 	DVB_DVR_DEV,
 	DVB_PAINEL_DEV,
+	DVB_ENCODER_DEV,
 };
 
 static int dvb_hisi_file_type(const char *path) {
@@ -64,6 +69,8 @@ static int dvb_hisi_file_type(const char *path) {
 		return DVB_DVR_DEV;
 	else if (strEquals((char*)path, "/" PAINEL_DEV, false))
 		return DVB_PAINEL_DEV;
+	else if (strEquals((char*)path, "/" ENCODER_DEV, true))
+		return DVB_ENCODER_DEV;
 
 	return DVB_NONE;
 }
@@ -102,6 +109,7 @@ static int dvb_hisi_getattr(const char *path, struct stat *stbuf, struct fuse_fi
 		case DVB_VIDEO_DEV:
 		case DVB_DVR_DEV:
 		case DVB_PAINEL_DEV:
+		case DVB_ENCODER_DEV:
 			stbuf->st_mode  = S_IFREG | 0660;
 			stbuf->st_size  = 0;
 			stbuf->st_nlink = 1;
@@ -118,9 +126,29 @@ static int dvb_hisi_open(const char *path, struct fuse_file_info *fi) {
 	struct fuse_context *cxt = fuse_get_context();
 	struct class_ops *player = (struct class_ops *)cxt->private_data;
 
-	if (type == DVB_NONE)
+	if (type == DVB_NONE) {
 		return -ENOENT;
-	if ((fi->flags & O_ACCMODE) != O_RDONLY) {
+	} else if (type == DVB_ENCODER_DEV) {
+		if ((fi->flags & O_ACCMODE) != O_RDONLY) {
+			fi->fh = atoi(&path[(strlen(path)-2)]);
+
+			if (!fi->fh)
+				fi->fh = atoi(&path[(strlen(path)-1)]);
+			if (fi->fh >= MAX_ENCODERS)
+				return -ENOENT;
+			else if (encoders[fi->fh])
+				return -EBUSY;
+
+			encoders[fi->fh] = get_encoder();
+			if (!encoders[fi->fh]->create(encoders[fi->fh], fi->fh)) {
+				free(encoders[fi->fh]);
+				encoders[fi->fh] = NULL;
+				return -EBUSY;
+			}
+		} else {
+			return -EBUSY;
+		}
+	} else if ((fi->flags & O_ACCMODE) != O_RDONLY) {
 		/* Lock for only 1 access. */
 		switch (type) {
 			case DVB_AUDIO_DEV:
@@ -181,12 +209,38 @@ static int dvb_hisi_release(const char *path, struct fuse_file_info *fi) {
 					player->set_dvr(false);
 				}
 			break;
+			case DVB_ENCODER_DEV:
+				encoders[fi->fh]->destroy(encoders[fi->fh]);
+				free(encoders[fi->fh]);
+				encoders[fi->fh] = NULL;
+			break;
 			default:
 			break;
 		}
 	}
 
 	return 0;
+}
+
+static int dvb_hisi_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+	(void)offset;
+	int ret = -EINVAL;
+	int type = dvb_hisi_file_type(path);
+	struct fuse_context *cxt = fuse_get_context();
+	struct class_ops *player = (struct class_ops *)cxt->private_data;
+
+	if (!player)
+		return -EINVAL;
+
+	switch (type) {
+		case DVB_ENCODER_DEV:
+			ret = encoders[fi->fh]->read(encoders[fi->fh], buf, size);
+		break;
+		default:
+		break;
+	}
+
+	return ret;
 }
 
 static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
@@ -213,6 +267,9 @@ static int dvb_hisi_write(const char *path, const char *buf, size_t size, off_t 
 		break;
 		case DVB_PAINEL_DEV:
 			ret = player->write(DEV_PAINEL, buf, size);
+		break;
+		case DVB_ENCODER_DEV:
+			ret = encoders[fi->fh]->write(encoders[fi->fh], buf, size);
 		break;
 	}
 
@@ -261,6 +318,37 @@ static int dvb_hisi_ioctl(const char *path, unsigned int cmd, void *arg, struct 
 					break;
 				}
 			}
+		break;
+		case DVB_ENCODER_DEV:
+			switch (cmd) {
+				case IOCTL_BROADCOM_SET_VPID:
+					printf("%s: IOCTL_BROADCOM_SET_VPID\n", __FUNCTION__);
+
+					encoders[fi->fh]->set_pid(encoders[fi->fh], DEV_VIDEO, (int)(intptr_t)arg);
+				break;
+				case IOCTL_BROADCOM_SET_APID:
+					printf("%s: IOCTL_BROADCOM_SET_APID\n", __FUNCTION__);
+
+					encoders[fi->fh]->set_pid(encoders[fi->fh], DEV_AUDIO, (int)(intptr_t)arg);
+				break;
+				case IOCTL_BROADCOM_SET_PMTPID:
+					printf("%s: IOCTL_BROADCOM_SET_PMTPID\n", __FUNCTION__);
+
+					encoders[fi->fh]->set_pid(encoders[fi->fh], -1, (int)(intptr_t)arg);
+				break;
+				case IOCTL_BROADCOM_START_TRANSCODING:
+					printf("%s: IOCTL_BROADCOM_START_TRANSCODING\n", __FUNCTION__);
+
+					return encoders[fi->fh]->play(encoders[fi->fh]) - 1;
+				break;
+				case IOCTL_BROADCOM_STOP_TRANSCODING:
+					printf("%s: IOCTL_BROADCOM_STOP_TRANSCODING\n", __FUNCTION__);
+
+					return encoders[fi->fh]->stop(encoders[fi->fh]) - 1;
+				break;
+			}
+
+			return 0;
 		break;
 		default:
 			return -EINVAL;
@@ -485,6 +573,9 @@ static int dvb_hisi_poll(const char *path, struct fuse_file_info *fi, struct fus
 		case DVB_DVR_DEV:
 			return player->poll(DEV_DVR, ph, reventsp, dvb_hisi_open_mask & (1 << type));
 		break;
+		case DVB_ENCODER_DEV:
+			return encoders[fi->fh]->poll(encoders[fi->fh], ph, reventsp, false);
+		break;
 		default:
 			if (ph)
 				fuse_pollhandle_destroy(ph);
@@ -502,6 +593,7 @@ static struct fuse_operations dvb_hisi_oper = {
 	.readdir	= dvb_hisi_readdir,
 	.open		= dvb_hisi_open,
 	.release	= dvb_hisi_release,
+	.read		= dvb_hisi_read,
 	.write		= dvb_hisi_write,
 	.ioctl		= dvb_hisi_ioctl,
 	.poll		= dvb_hisi_poll,

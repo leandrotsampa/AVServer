@@ -23,6 +23,34 @@ enum {
 	DEV_PAINEL,
 };
 
+/* Encoder Operations */
+#define IOCTL_BROADCOM_SET_VPID          11
+#define IOCTL_BROADCOM_SET_APID          12
+#define IOCTL_BROADCOM_SET_PMTPID        13
+#define IOCTL_BROADCOM_START_TRANSCODING 100
+#define IOCTL_BROADCOM_STOP_TRANSCODING	 200
+
+struct encoder_ops {
+	bool (*create)(struct encoder_ops *, int);
+	void (*destroy)(struct encoder_ops *);
+
+	/** Call's for Player **/
+	bool (*set_pid)(struct encoder_ops *, int, int);
+	bool (*set_type)(struct encoder_ops *, int, int);
+	bool (*play)(struct encoder_ops *);
+	bool (*stop)(struct encoder_ops *);
+
+	/** Other's operations **/
+	int (*poll)(struct encoder_ops *, struct fuse_pollhandle *, unsigned *, bool);
+	int (*read)(struct encoder_ops *, char *, size_t);
+	int (*write)(struct encoder_ops *, const char *, size_t);
+
+	/** Private data **/
+	void *priv;
+};
+
+struct encoder_ops *get_encoder(void);
+
 /* Class Operations */
 struct class_ops {
 	bool (*create)(void);

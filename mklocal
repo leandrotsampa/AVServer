@@ -51,8 +51,10 @@ OUT     := AVServer
 VERSION := \"$(shell date "+%Y.%m-%d (Build: %H%M%S)")\"
 
 LOCAL_SRCS := AVServer.c \
+              buffer.c \
+              encoder.c \
               player.c \
-			  string_ext.c
+              string_ext.c
 
 LOCAL_SRCS += avplay/mpi_avplay.c \
 			  avplay/unf_avplay.c \
@@ -60,7 +62,7 @@ LOCAL_SRCS += avplay/mpi_avplay.c \
 			  avplay/frame_detect.c \
 			  avplay/bitstream.c
 
-CFLAGS         += -DHAVE_AVCODEC
+CFLAGS         += -DHAVE_AVCODEC -DCONFIG_SUPPORT_CA_RELEASE
 HI_DEPEND_LIBS += -l:libavcodec.so.56
 
 CFLAGS += -DFUSERMOUNT_DIR=\"/tmp\" -D_REENTRANT -DFUSE_USE_VERSION=31
@@ -80,6 +82,25 @@ LIBFUSE_SRCS := libfuse/fuse.c \
                 libfuse/mount_util.h \
                 libfuse/modules/subdir.c \
                 libfuse/modules/iconv.c
+
+LIBMPEG_SRCS := libmpeg/mpeg-crc32.c \
+                libmpeg/mpeg-element-descriptor.c \
+                libmpeg/mpeg-pack-header.c \
+                libmpeg/mpeg-packet.c \
+                libmpeg/mpeg-pat.c \
+                libmpeg/mpeg-pes.c \
+                libmpeg/mpeg-pmt.c \
+                libmpeg/mpeg-ps-dec.c \
+                libmpeg/mpeg-ps-enc.c \
+                libmpeg/mpeg-psd.c \
+                libmpeg/mpeg-psm.c \
+                libmpeg/mpeg-sdt.c \
+                libmpeg/mpeg-system-header.c \
+                libmpeg/mpeg-ts-dec.c \
+                libmpeg/mpeg-ts-enc.c \
+                libmpeg/mpeg-ts-h264.c \
+                libmpeg/mpeg-ts-h265.c \
+                libmpeg/mpeg-util.c
 
 COMMON_SRCS := $(SAMPLE_DIR)/common/hi_adp_demux.c \
                $(SAMPLE_DIR)/common/hi_adp_data.c \
@@ -105,7 +126,7 @@ strip: $(OUT)
 	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-strip --strip-all $(OUT)
 
 $(OUT): clean version
-	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-gcc -Wall -D_FILE_OFFSET_BITS=64 $(CFLAGS) $(HI_DEPEND_LIBS) -o $(OUT) $(LOCAL_SRCS) $(LIBFUSE_SRCS) $(COMMON_SRCS)
+	@$(CFG_HI_ARM_TOOLCHAINS_NAME)-gcc -Wall -D_FILE_OFFSET_BITS=64 $(CFLAGS) $(HI_DEPEND_LIBS) -o $(OUT) $(LOCAL_SRCS) $(LIBFUSE_SRCS) $(LIBMPEG_SRCS) $(COMMON_SRCS)
 
 clean:
 	@rm -f $(OUT)

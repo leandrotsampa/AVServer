@@ -79,7 +79,7 @@ static void encoder_read_config(int id, char *property, char *value, size_t size
 }
 
 static void *encoder_ts_alloc(void *param, size_t bytes) {
-	return malloc(TS_PACKET_SIZE);
+	return malloc(bytes);
 }
 
 static void encoder_ts_free(void *param, void *packet) {
@@ -518,6 +518,8 @@ bool encoder_play(struct encoder_ops *ops) {
 
 	encoder_read_config(encoder->id, "framerate", value, sizeof(value));
 	stVencAttr.u32TargetFrmRate = strtoul(value, NULL, 10);
+	if (stVencAttr.u32TargetFrmRate > 1000)
+		stVencAttr.u32TargetFrmRate /= 1000;
 	stVencAttr.u32InputFrmRate  = stVencAttr.u32TargetFrmRate;
 	if (!(stVencAttr.u32TargetFrmRate > 0 && stVencAttr.u32TargetFrmRate <= 60)) {
 		stVencAttr.u32TargetFrmRate = 25;

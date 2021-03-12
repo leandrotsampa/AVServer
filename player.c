@@ -1891,8 +1891,6 @@ int player_poll(int dev_type, struct fuse_pollhandle *ph, unsigned *reventsp, bo
 
 int player_write(int dev_type, const char *buf, size_t size)
 {
-	int pos;
-	bool IsHeader;
 	unsigned char c_s;
 	unsigned char c_e;
 	HI_UNF_STREAM_BUF_S sBuf;
@@ -1998,6 +1996,9 @@ int player_write(int dev_type, const char *buf, size_t size)
 			return size;
 		break;
 	}
+
+	int pos = 0;
+	bool IsHeader = false;
 
 	if (size <= 5)
 		return size;

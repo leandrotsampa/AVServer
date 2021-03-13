@@ -755,15 +755,15 @@ bool player_clear(int dev_type)
 	switch (dev_type)
 	{
 		case DEV_AUDIO:
-			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
-				printf("[ERROR-AUD] %s: Failed to Reset player.\n", __FUNCTION__);
+			if (player->VideoState == 0)
+				if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
+					printf("[ERROR-AUD] %s: Failed to Reset player.\n", __FUNCTION__);
 
 			player->AudioBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
 		break;
 		case DEV_VIDEO:
-			if (player->AudioState == 0)
-				if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
-					printf("[ERROR-VID] %s: Failed to Reset player.\n", __FUNCTION__);
+			if (HI_UNF_AVPLAY_Reset(player->hPlayer, HI_NULL) != HI_SUCCESS)
+				printf("[ERROR-VID] %s: Failed to Reset player.\n", __FUNCTION__);
 
 			player->VideoBufferState = HI_UNF_AVPLAY_BUF_STATE_EMPTY;
 		break;

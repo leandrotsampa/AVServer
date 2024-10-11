@@ -1,2 +1,2 @@
-Build:
-Clone this projeto to folder sample in SDK.
+### Build
+Clone this project to Sample folder in Hisilicon SDK.
